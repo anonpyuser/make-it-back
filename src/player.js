@@ -229,7 +229,31 @@ function boneKey(name) {
   return String(name || '').replace(/^mixamorig:?/i, '');
 }
 
+// q and -q are the same pose; a sign flip mid-track makes nlerp/slerp take the long way around.
+function makeQuatContinuous(track) {
+  const v = track.values;
+  if (!v || v.length < 8) return;
+  for (let i = 4; i < v.length; i += 4) {
+    const dot = v[i - 4] * v[i] + v[i - 3] * v[i + 1] + v[i - 2] * v[i + 2] + v[i - 1] * v[i + 3];
+    if (dot < 0) {
+      v[i] = -v[i]; v[i + 1] = -v[i + 1]; v[i + 2] = -v[i + 2]; v[i + 3] = -v[i + 3];
+    }
+  }
+  // Looping clips: keep the last key in the same hemisphere as the first.
+  const n = v.length;
+  const loopDot = v[0] * v[n - 4] + v[1] * v[n - 3] + v[2] * v[n - 2] + v[3] * v[n - 1];
+  if (loopDot < 0) {
+    v[n - 4] = -v[n - 4]; v[n - 3] = -v[n - 3]; v[n - 2] = -v[n - 2]; v[n - 1] = -v[n - 1];
+  }
+}
+
+function isHeadBone(key) {
+  return key === 'Head' || key === 'Neck' || key === 'HeadTop_End';
+}
+
 function retargetClip(clip, targetRoot, clipName) {
+  const name = clipName || clip.name;
+  const stripHead = name === 'strafeLeft' || name === 'strafeRight' || name === 'idle';
   const names = new Map();
   targetRoot.traverse((o) => {
     if (o.name) names.set(boneKey(o.name), o.name);
@@ -240,12 +264,19 @@ function retargetClip(clip, targetRoot, clipName) {
     if (dot < 0) continue;
     const node = t.name.slice(0, dot);
     const prop = t.name.slice(dot + 1);
-    const mapped = names.get(boneKey(node));
+    const key = boneKey(node);
+    const mapped = names.get(key);
     if (!mapped) continue;
+    // Strafe Head/Neck tracks are the suspect for a 360° spin while moving.
+    // Keep the head on the idle aim pose instead (see idleHead in setupAnims).
+    if (stripHead && isHeadBone(key)) continue;
     const nt = t.clone();
     nt.name = `${mapped}.${prop}`;
+    if ((prop === 'quaternion' || prop === 'rotation') && nt.values && nt.values.length >= 8) {
+      makeQuatContinuous(nt);
+    }
     // Strip root motion so the game can slide him on X without the clip walking away.
-    if (prop === 'position' && boneKey(node) === 'Hips' && nt.values && nt.values.length >= 3) {
+    if (prop === 'position' && key === 'Hips' && nt.values && nt.values.length >= 3) {
       const v = nt.values;
       const x0 = v[0], z0 = v[2];
       for (let i = 0; i < v.length; i += 3) {
@@ -255,14 +286,41 @@ function retargetClip(clip, targetRoot, clipName) {
     }
     tracks.push(nt);
   }
-  return new THREE.AnimationClip(clipName || clip.name, clip.duration, tracks);
+  return new THREE.AnimationClip(name, clip.duration, tracks);
+}
+
+function extractHeadClip(clip, targetRoot, newName) {
+  const names = new Map();
+  targetRoot.traverse((o) => {
+    if (o.name) names.set(boneKey(o.name), o.name);
+  });
+  const tracks = [];
+  for (const t of clip.tracks) {
+    const dot = t.name.indexOf('.');
+    if (dot < 0) continue;
+    const node = t.name.slice(0, dot);
+    const prop = t.name.slice(dot + 1);
+    const key = boneKey(node);
+    if (!isHeadBone(key)) continue;
+    const mapped = names.get(key);
+    if (!mapped) continue;
+    const nt = t.clone();
+    nt.name = `${mapped}.${prop}`;
+    if ((prop === 'quaternion' || prop === 'rotation') && nt.values && nt.values.length >= 8) {
+      makeQuatContinuous(nt);
+    }
+    tracks.push(nt);
+  }
+  return tracks.length ? new THREE.AnimationClip(newName, clip.duration, tracks) : null;
 }
 
 function playAnim(ud, name, fade = 0.12) {
-  if (!ud.actions || !ud.actions[name]) return;
+  if (!ud.actions || !ud.actions[name] || name === 'idleHead') return;
   if (ud.currentClip === name && name !== 'shoot') return;
   const next = ud.actions[name];
   const prev = ud.action;
+  // The always-on idleHead action must keep running through body crossfades.
+  if (prev && prev === ud.actions.idleHead) return;
   if (name === 'shoot') {
     next.reset().setEffectiveWeight(1).fadeIn(0.05).play();
     if (prev && prev !== next) prev.fadeOut(0.05);
@@ -271,7 +329,7 @@ function playAnim(ud, name, fade = 0.12) {
     ud.shooting = true;
     return;
   }
-  if (prev && prev !== next) prev.fadeOut(fade);
+  if (prev && prev !== next && prev !== ud.actions.idleHead) prev.fadeOut(fade);
   next.reset().setEffectiveWeight(1).fadeIn(fade).play();
   ud.action = next;
   ud.currentClip = name;
@@ -282,7 +340,9 @@ function setupAnims(g, animGltf) {
   if (!ud.isSkinned || !ud.model || !animGltf?.animations?.length) return;
   const mixer = new THREE.AnimationMixer(ud.model);
   const actions = {};
+  let idleSrc = null;
   for (const clip of animGltf.animations) {
+    if (clip.name === 'idle') idleSrc = clip;
     const retargeted = retargetClip(clip, ud.model, clip.name);
     if (!retargeted.tracks.length) continue;
     const action = mixer.clipAction(retargeted);
@@ -293,6 +353,16 @@ function setupAnims(g, animGltf) {
       action.setLoop(THREE.LoopRepeat, Infinity);
     }
     actions[clip.name] = action;
+  }
+  // Always-on head layer from idle, so idle↔strafe body crossfades cannot slerp the head the long way.
+  if (idleSrc) {
+    const headClip = extractHeadClip(idleSrc, ud.model, 'idleHead');
+    if (headClip) {
+      const headAct = mixer.clipAction(headClip);
+      headAct.setLoop(THREE.LoopRepeat, Infinity);
+      headAct.setEffectiveWeight(1).play();
+      actions.idleHead = headAct;
+    }
   }
   ud.mixer = mixer;
   ud.actions = actions;
