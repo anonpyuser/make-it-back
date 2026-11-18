@@ -13,11 +13,10 @@ On iPhone: open the link in Safari → Share → **Add to Home Screen** → it l
 ## How to play
 | Action | Touch | Keyboard |
 |---|---|---|
-| Move left / right | ◀ ▶ buttons | A / D or ← → |
-| Shoot (hold) | FIRE | Space |
-| Aim (laser sight) | Drag on the right side, or drag on FIRE | — |
-| Reload | RELOAD | R |
-| Swap pistol | SWAP (only if you found another pistol) | Q |
+| Move left / right | Hold the left or right half of the screen | A / D or ← → |
+| Aim (laser sight) | The AIM stick in the bottom-left (always visible). Touching the stick aims only — it never moves you. | — |
+| Shoot | Tap with a second finger, or a quick tap while standing still | Space |
+| Reload | Happens automatically when the clip is empty | R |
 | Pause | ⏸ | Esc / P |
 
 - **Barricade**: zombies stop to smash it. If it breaks they come for you. If your health hits 0, game over.

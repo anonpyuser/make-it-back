@@ -93,6 +93,10 @@ window.__mib = {
   get player() { return ctx.player; },
   get camera() { return ctx.camera; },
   setCamHold(v) { ctx.camHold = !!v; },
+  inputState() {
+    const i = ctx.input;
+    return { left: !!i.left, right: !!i.right, fire: !!i.fire, aimYaw: i.aimYaw || 0, aimPitch: i.aimPitch || 0, px: ctx.G.px };
+  },
   headPose() {
     const head = ctx.player?.userData?.head;
     if (!head) return null;

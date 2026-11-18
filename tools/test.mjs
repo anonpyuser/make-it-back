@@ -33,9 +33,63 @@ if (wave1.ammo !== wave1.allotment) {
 }
 if (wave1.ammo !== wave1.allotment) errors.push(`[test] wave1 ammo ${wave1.ammo} != allotment ${wave1.allotment}`);
 
-// Sample the head bone for several seconds while playing. A spinning head
-// would unwind many radians; the world yaw must stay bounded.
-const sampleHead = async (ms = 3500) => page.evaluate((ms) => new Promise((resolve) => {
+// Pointer helpers: movement is a hold on the left/right HALF of the screen,
+// well above the aim stick. The stick itself must never start a move.
+const ptr = async (type, id, x, y, extra = {}) => {
+  await page.evaluate(({ type, id, x, y, extra }) => {
+    const ev = new PointerEvent(type, {
+      bubbles: true, cancelable: true, pointerType: 'touch',
+      pointerId: id, clientX: x, clientY: y, buttons: type === 'pointerup' ? 0 : 1,
+      isPrimary: id === 1, ...extra,
+    });
+    const el = document.elementFromPoint(x, y) || window;
+    el.dispatchEvent(ev);
+  }, { type, id, x, y, extra });
+};
+const leftMove = { x: 80, y: 420 };
+const rightMove = { x: 310, y: 420 };
+const holdHalf = async (side, ms, id = 11) => {
+  const p = side === 'left' ? leftMove : rightMove;
+  await ptr('pointerdown', id, p.x, p.y);
+  await page.waitForTimeout(ms);
+  await ptr('pointerup', id, p.x, p.y);
+};
+
+// --- Aim stick must be visible, and touching it must NEVER move the player ---
+const stickVis = await page.evaluate(() => {
+  const s = document.getElementById('aimStick');
+  if (!s) return { ok: false, reason: 'missing' };
+  const r = s.getBoundingClientRect();
+  const st = getComputedStyle(s);
+  return { ok: true, w: r.width, h: r.height, x: r.x, y: r.y, vis: st.visibility, op: st.opacity, display: st.display };
+});
+console.log('aim stick', JSON.stringify(stickVis));
+if (!stickVis.ok) errors.push('[test] aim stick element missing');
+if (stickVis.ok && (stickVis.w < 80 || stickVis.h < 80)) errors.push(`[test] aim stick too small (${stickVis.w}x${stickVis.h})`);
+if (stickVis.ok && (stickVis.vis === 'hidden' || stickVis.display === 'none' || +stickVis.op === 0)) {
+  errors.push('[test] aim stick is not visible');
+}
+await page.screenshot({ path: out + '12-joystick.png' });
+
+const pxBefore = await page.evaluate(() => __mib.G.px);
+const stick = await page.evaluate(() => {
+  const r = document.getElementById('aimStick').getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
+await ptr('pointerdown', 7, stick.x, stick.y);
+await ptr('pointermove', 7, stick.x + 40, stick.y);
+await page.waitForTimeout(400);
+const afterStick = await page.evaluate(() => __mib.inputState());
+console.log('after stick drag', JSON.stringify(afterStick), 'pxBefore', pxBefore);
+if (afterStick.left || afterStick.right) errors.push('[test] aim-stick touch started a move (left/right was set)');
+if (Math.abs(afterStick.px - pxBefore) > 0.05) errors.push(`[test] aim-stick touch moved the player (px ${pxBefore} -> ${afterStick.px})`);
+if (Math.abs(afterStick.aimYaw) < 0.05) errors.push('[test] aim-stick drag did not change aimYaw');
+await page.screenshot({ path: out + '13-joystick-aim.png' });
+await ptr('pointerup', 7, stick.x + 40, stick.y);
+await page.waitForTimeout(100);
+
+// Head bone samples while strafing LEFT then RIGHT for 5s each.
+const sampleHead = async (ms = 5000) => page.evaluate((ms) => new Promise((resolve) => {
   const vals = [];
   const t0 = performance.now();
   const step = () => {
@@ -46,9 +100,6 @@ const sampleHead = async (ms = 3500) => page.evaluate((ms) => new Promise((resol
   };
   requestAnimationFrame(step);
 }), ms);
-const headHold = page.dispatchEvent('#btnLeft', 'pointerdown', { pointerType: 'touch' }).then(() => sampleHead(3500));
-const headSamples = await headHold;
-await page.dispatchEvent('#btnLeft', 'pointerup', { pointerType: 'touch' });
 const unwrap = (angles) => {
   if (!angles.length) return [];
   const out = [angles[0]];
@@ -60,46 +111,46 @@ const unwrap = (angles) => {
   }
   return out;
 };
-const wys = unwrap(headSamples.map((s) => s.wy));
-const lys = unwrap(headSamples.map((s) => s.ly));
 const range = (a) => a.length ? Math.max(...a) - Math.min(...a) : 0;
-const headReport = {
-  n: headSamples.length,
-  skinned: headSamples[0] && headSamples[0].skinned,
-  wyRange: range(wys),
-  lyRange: range(lys),
+const reportHead = (label, samples) => {
+  const wys = unwrap(samples.map((s) => s.wy));
+  const lys = unwrap(samples.map((s) => s.ly));
+  const rep = { n: samples.length, skinned: samples[0] && samples[0].skinned, wyRange: range(wys), lyRange: range(lys) };
+  console.log('head pose', label, JSON.stringify(rep));
+  if (!samples.length) errors.push(`[test] no head pose samples (${label})`);
+  if (rep.wyRange > 1.5) errors.push(`[test] ${label}: head world yaw range ${rep.wyRange.toFixed(3)} rad — head is spinning`);
+  if (rep.lyRange > 1.5) errors.push(`[test] ${label}: head local yaw range ${rep.lyRange.toFixed(3)} rad — head is spinning`);
+  return rep;
 };
-console.log('head pose samples', JSON.stringify(headReport));
-if (!headSamples.length) errors.push('[test] no head pose samples');
-// A spinning head unwinds many radians; idle/strafe look should stay well under a turn.
-if (headReport.wyRange > 1.5) errors.push(`[test] head world yaw range ${headReport.wyRange.toFixed(3)} rad — head is spinning`);
-if (headReport.lyRange > 1.5) errors.push(`[test] head local yaw range ${headReport.lyRange.toFixed(3)} rad — head is spinning`);
-
-const hold = async (sel, ms) => {
-  const b = await page.locator(sel).boundingBox();
-  const x = b.x + b.width / 2, y = b.y + b.height / 2;
-  await page.dispatchEvent(sel, 'pointerdown', { pointerType: 'touch', clientX: x, clientY: y });
-  await page.waitForTimeout(ms);
-  await page.dispatchEvent(sel, 'pointerup', { pointerType: 'touch', clientX: x, clientY: y });
-};
-
-// mid-strafe still
-await page.dispatchEvent('#btnLeft', 'pointerdown', { pointerType: 'touch' });
-await page.waitForTimeout(700);
-console.log('strafe clip', await page.evaluate(() => __mib.clip()));
+await ptr('pointerdown', 11, leftMove.x, leftMove.y);
+reportHead('strafe-left-5s', await sampleHead(5000));
 await page.screenshot({ path: out + '07-strafe.png' });
-await page.dispatchEvent('#btnLeft', 'pointerup', { pointerType: 'touch' });
+await ptr('pointerup', 11, leftMove.x, leftMove.y);
+await page.waitForTimeout(200);
+await ptr('pointerdown', 12, rightMove.x, rightMove.y);
+reportHead('strafe-right-5s', await sampleHead(5000));
+await ptr('pointerup', 12, rightMove.x, rightMove.y);
 
-// shooting still
-await page.dispatchEvent('#btnFire', 'pointerdown', { pointerType: 'touch' });
+// mid-strafe still (already captured 07). Second-finger tap to shoot.
+await ptr('pointerdown', 11, leftMove.x, leftMove.y);
+await page.waitForTimeout(300);
+const ammoBeforeTap = await page.evaluate(() => __mib.totalAmmo());
+await ptr('pointerdown', 8, rightMove.x, 500);
 await page.waitForTimeout(400);
-console.log('shoot clip', await page.evaluate(() => __mib.clip()));
+console.log('shoot clip / input', await page.evaluate(() => ({ clip: __mib.clip(), ...__mib.inputState(), ammo: __mib.totalAmmo() })));
 await page.screenshot({ path: out + '08-shooting.png' });
+const ammoDuring = await page.evaluate(() => __mib.totalAmmo());
+if (ammoDuring >= ammoBeforeTap) errors.push(`[test] second-finger tap did not spend ammo (${ammoBeforeTap} -> ${ammoDuring})`);
+await ptr('pointerup', 8, rightMove.x, 500);
+await ptr('pointerup', 11, leftMove.x, leftMove.y);
 
-// hold fire while moving left/right
-await hold('#btnLeft', 1200);
-await hold('#btnRight', 2400);
-await hold('#btnLeft', 1200);
+// hold fire (space) while moving left/right
+await page.keyboard.down(' ');
+await holdHalf('left', 1200, 21);
+await holdHalf('right', 2400, 22);
+await holdHalf('left', 1200, 21);
+await page.keyboard.up(' ');
+
 const fps = await page.evaluate(() => new Promise(r => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else r(n / 2); }; requestAnimationFrame(f); }));
 console.log('headless fps (software GL):', fps);
 // wait until zombies are close enough to see clearly (game time runs slow under software GL)
@@ -109,7 +160,6 @@ console.log('mid-wave', JSON.stringify(st));
 await page.screenshot({ path: out + '02-gameplay.png' });
 await page.waitForTimeout(6000);
 await page.screenshot({ path: out + '03-gameplay-later.png' });
-await page.dispatchEvent('#btnFire', 'pointerup', { pointerType: 'touch' });
 st = await page.evaluate(() => ({ state: __mib.state, kills: __mib.G.kills, toSpawn: __mib.G.toSpawn, bc: Math.round(__mib.G.barricade), hp: Math.round(__mib.G.health), ammoLeft: __mib.totalAmmo() }));
 console.log('later', JSON.stringify(st));
 const ammoBeforeClear = await page.evaluate(() => __mib.totalAmmo());
