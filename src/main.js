@@ -2,7 +2,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { ctx, $ } from './core.js';
 import { buildWorld } from './world.js';
-import { makePlayer } from './player.js';
+import { makePlayer, updatePlayer, debugSetAim } from './player.js';
 import { initEffects, updateEffects } from './effects.js';
 import { newSave } from './save.js';
 import { updateWave } from './waves.js';
@@ -38,6 +38,7 @@ resize();
 
 // ----- camera: orbit the kid on the title screen, follow behind him in game -----
 function updateCamera(dt) {
+  if (ctx.camHold) return;
   if (ctx.state === 'title') {
     const t = performance.now() / 1000;
     camera.position.set(Math.sin(t * 0.35) * 1.6, 1.55, -2.4 + Math.cos(t * 0.35) * 0.2);
@@ -67,6 +68,8 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (ctx.state === 'playing') updateWave(dt);
+  if (ctx.state === 'title') ctx.G.time += dt;
+  if (ctx.state === 'playing' || ctx.state === 'title') updatePlayer(dt);
   ctx.world.update(dt);
   updateCamera(dt);
   updateEffects(dt);
@@ -82,6 +85,10 @@ window.__mib = {
   get G() { return ctx.G; },
   get save() { return ctx.save; },
   clearWave() { ctx.G.toSpawn = 0; for (const z of ctx.G.zombies) if (!z.dead) damageZombie(z, 1e6); },
+  debugSetAim,
+  get player() { return ctx.player; },
+  get camera() { return ctx.camera; },
+  setCamHold(v) { ctx.camHold = !!v; },
 };
 
 initUI();

@@ -40,6 +40,8 @@ To test on a phone on the same Wi-Fi, open `http://<your-computer-ip>:8642`.
 - **Three.js r170**, vendored at `vendor/three.module.min.js` (no CDN at runtime).
 - Plain ES modules, no bundler. Everything uses relative paths, so it works from a sub-path like GitHub Pages.
 - All textures are drawn in code on canvases (`src/textures.js`); all sound is synthesized with WebAudio (`src/audio.js`). No image or audio files besides the app icons.
+- Character: Mixamo Aj is loaded from a GLB (stored in the repo as base64 in `assets/b64/`, decoded by `npm run assets` and the Pages workflow). The original box-kid is kept as a fallback if the file fails to load.
+- Pistol only: scavenging finds pistol upgrades (damage, fire rate, clip size, reload speed), plus supplies and survivors.
 - Performance: low-poly primitives, Lambert materials, no shadows, instanced rubble/particles, pixel ratio capped at 2 and lowered automatically if frames get slow.
 - PWA: `manifest.webmanifest`, `icons/` (SVG source + generated PNGs including `apple-touch-icon.png`).
 
@@ -51,10 +53,10 @@ One file per system so two people (or agents) rarely edit the same file:
 | `src/main.js` | Renderer, camera, frame loop, debug hook |
 | `src/core.js` | Shared `ctx` game state object |
 | `src/config.js` | Tunable constants (health, barricade, day hours, speeds) |
-| `src/player.js` | The kid's model and movement |
+| `src/player.js` | The kid's model (GLB + fallback) and movement |
 | `src/zombies.js` | Zombie models, types, spawning, AI, damage |
 | `src/waves.js` | Difficulty curve, wave start/end, game over |
-| `src/weapons.js` | Weapon stats, firing, reload, swap |
+| `src/weapons.js` | Pistol stats, upgrades, firing, reload |
 | `src/survivors.js` | Survivor models and auto-shooting |
 | `src/search.js` | Scavenging locations, loot tables, search screen |
 | `src/ui.js` | Screens, HUD, touch/keyboard input |
@@ -71,6 +73,7 @@ reaches the search screen, checks save/continue, and forces a barricade breach t
 
 ```bash
 npm install          # playwright-core + three (dev only)
+npm run assets       # decode icons + the character GLB from base64
 python3 -m http.server 8642 &
 npm test             # screenshots land in screenshots/
 ```
