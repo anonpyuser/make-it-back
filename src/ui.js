@@ -59,6 +59,7 @@ function releaseInputs() {
   input.aimYaw = 0; input.aimPitch = 0;
   playPointers.clear();
   resetStickKnob();
+  setFirePressed(false);
 }
 export function togglePause() {
   if (ctx.state === 'playing') { ctx.state = 'paused'; releaseInputs(); show('pause'); }
@@ -90,16 +91,31 @@ function isHudChrome(el) {
   return !!(el && el.closest && el.closest('.icon-btn, #btnPause, #btnMute, #pause, #search, #gameover, #title, .btn'));
 }
 
+function hitCircle(el, x, y, pad = 10) {
+  if (!el || el.closest('.hidden')) return false;
+  const r = el.getBoundingClientRect();
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const rad = Math.max(r.width, r.height) / 2 + pad;
+  const dx = x - cx, dy = y - cy;
+  return dx * dx + dy * dy <= rad * rad;
+}
+
 // Hit-test the visible stick (plus a little padding) in screen space.
 function isOnAimStick(el, x, y) {
   const stick = $('aimStick');
-  if (!stick || stick.closest('.hidden')) return false;
   if (el && el.closest && el.closest('#aimStick')) return true;
-  const r = stick.getBoundingClientRect();
-  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-  const rad = Math.max(r.width, r.height) / 2 + 10;
-  const dx = x - cx, dy = y - cy;
-  return dx * dx + dy * dy <= rad * rad;
+  return hitCircle(stick, x, y, 10);
+}
+
+// A touch that starts on FIRE only fires — it never moves him (it's on the right half).
+function isOnFireButton(el, x, y) {
+  const btn = $('btnFire');
+  if (el && el.closest && el.closest('#btnFire')) return true;
+  return hitCircle(btn, x, y, 10);
+}
+
+function setFirePressed(on) {
+  $('btnFire')?.classList.toggle('pressed', !!on);
 }
 
 function stickCenter() {
@@ -156,6 +172,13 @@ function initPlayControls(input) {
       applyStick(x, y);
       return;
     }
+    if (isOnFireButton(e.target, x, y)) {
+      playPointers.set(e.pointerId, { kind: 'fire', t0: performance.now() });
+      setFirePressed(true);
+      syncMoveFire();
+      return;
+    }
+    // Second finger (or a finger while already aiming/moving) shoots; FIRE itself is handled above.
     const busy = [...playPointers.values()].some((p) => p.kind === 'moveLeft' || p.kind === 'moveRight' || p.kind === 'aim');
     if (busy) {
       playPointers.set(e.pointerId, { kind: 'fire', t0: performance.now() });
@@ -187,6 +210,15 @@ function initPlayControls(input) {
       resetStickKnob();
       input.aimYaw = 0;
       input.aimPitch = 0;
+    } else if (p.kind === 'fire') {
+      const still = [...playPointers.entries()].some(([id, o]) => id !== e.pointerId && o.kind === 'fire');
+      if (!still) setFirePressed(false);
+      if (held <= TAP_MS) {
+        playPointers.delete(e.pointerId);
+        syncMoveFire();
+        pulseFire();
+        return;
+      }
     } else if (p.maybeTap && held <= TAP_MS && (p.kind === 'moveLeft' || p.kind === 'moveRight')) {
       playPointers.delete(e.pointerId);
       syncMoveFire();

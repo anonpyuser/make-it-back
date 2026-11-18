@@ -1,10 +1,11 @@
 :root { --orange: #ff7a1a; --red: #d23a2a; --ink: #f3ece0; --panel: rgba(14, 12, 10, 0.86); }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0908; color: var(--ink);
+html, body { margin: 0; width: 100%; height: 100%; height: 100dvh; min-height: 100%; min-height: 100dvh;
+  overflow: hidden; background: #0a0908; color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: none; overscroll-behavior: none; }
-#game { position: fixed; inset: 0; }
-#game canvas { display: block; width: 100%; height: 100%; }
+#game { position: fixed; inset: 0; width: 100%; height: 100%; height: 100dvh; }
+#game canvas { display: block; width: 100% !important; height: 100% !important; touch-action: none; }
 .hidden { display: none !important; }
 .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: calc(env(safe-area-inset-top) + 16px) 20px calc(env(safe-area-inset-bottom) + 16px); text-align: center; z-index: 10; }
@@ -29,7 +30,11 @@ h2 { margin: 6px 0; font-size: 28px; font-family: Impact, "Arial Black", sans-se
 
 /* HUD */
 #hud { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
-.hud-top { position: absolute; top: calc(env(safe-area-inset-top) + 8px); left: 10px; right: 10px; display: flex; flex-direction: column; gap: 6px; }
+.hud-top { position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: calc(10px + env(safe-area-inset-left, 0px));
+  right: calc(10px + env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 6px; }
 .hud-row { display: flex; gap: 6px; align-items: center; }
 .pill { background: rgba(0,0,0,.55); border-radius: 10px; padding: 6px 10px; font-weight: 800; font-size: 15px; }
 #hudWave { color: var(--orange); }
@@ -45,7 +50,9 @@ h2 { margin: 6px 0; font-size: 28px; font-family: Impact, "Arial Black", sans-se
 .banner.show { opacity: 1; }
 .banner small { display: block; font-size: 18px; color: var(--ink); font-family: -apple-system, sans-serif; font-weight: 700; }
 .hurt { position: absolute; inset: 0; box-shadow: inset 0 0 90px 30px rgba(200,0,0,.8); opacity: 0; transition: opacity .25s; }
-.controls { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 14px calc(env(safe-area-inset-bottom) + 16px); display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; pointer-events: none; }
+.controls { position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 0 calc(14px + env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 16px) calc(14px + env(safe-area-inset-left, 0px));
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; pointer-events: none; }
 .aim-stick { pointer-events: auto; touch-action: none; position: relative; width: 122px; height: 122px; flex: 0 0 122px; z-index: 6; }
 .aim-base { position: absolute; inset: 0; border-radius: 50%;
   border: 4px solid rgba(255, 210, 150, 0.95);
@@ -56,11 +63,18 @@ h2 { margin: 6px 0; font-size: 28px; font-family: Impact, "Arial Black", sans-se
   background: radial-gradient(circle at 32% 28%, #ffd7b0, #ff7a1a 58%, #b33a00);
   border: 3px solid #ffe7cc; box-shadow: 0 3px 10px rgba(0,0,0,.55); will-change: transform; }
 .aim-label { position: absolute; left: 0; right: 0; bottom: -16px; text-align: center; font-size: 11px; font-weight: 900; letter-spacing: 1px; color: #ffd2a0; text-shadow: 0 1px 3px #000; pointer-events: none; }
-.weapon-info { pointer-events: none; flex: 1; text-align: right; padding-bottom: 10px; text-shadow: 0 2px 3px #000; min-width: 0; }
+.weapon-info { pointer-events: none; flex: 1; text-align: center; padding-bottom: 18px; text-shadow: 0 2px 3px #000; min-width: 0; }
 #hudWeapon { font-weight: 900; font-size: 15px; color: var(--orange); letter-spacing: 1px; }
 #hudAmmo { font-weight: 900; font-size: 22px; }
 .reload-bar { height: 5px; margin: 4px auto 0; width: 70px; background: rgba(0,0,0,.6); border-radius: 3px; overflow: hidden; visibility: hidden; }
 .reload-bar div { height: 100%; width: 0; background: #ffd27a; }
+.ctl { appearance: none; pointer-events: auto; touch-action: none; border: 3px solid rgba(255,255,255,.35); background: rgba(20,18,15,.55); color: #fff;
+  border-radius: 50%; font-size: 22px; font-weight: 900; display: flex; align-items: center; justify-content: center; font-family: inherit; }
+.ctl.fire { width: 112px; height: 112px; flex: 0 0 112px; letter-spacing: 1px;
+  background: radial-gradient(circle at 32% 28%, rgba(255,110,80,.95), rgba(190,36,18,.88) 58%, rgba(110,10,6,.92));
+  border-color: #ffb39a; box-shadow: 0 0 0 3px rgba(0,0,0,.5), 0 4px 16px rgba(0,0,0,.45), inset 0 0 16px rgba(0,0,0,.25); }
+.ctl.fire.pressed { background: radial-gradient(circle at 32% 28%, rgba(255,160,120,.98), rgba(255,70,30,.95) 58%, rgba(160,20,8,.95));
+  border-color: #ffe0d0; box-shadow: 0 0 0 3px rgba(0,0,0,.5), 0 0 18px rgba(255,80,30,.55); }
 
 /* Search */
 #search h2 { margin-top: 4px; }

@@ -13,9 +13,9 @@ On iPhone: open the link in Safari → Share → **Add to Home Screen** → it l
 ## How to play
 | Action | Touch | Keyboard |
 |---|---|---|
-| Move left / right | Hold the left or right half of the screen | A / D or ← → |
+| Move left / right | Hold the left or right half of the screen (not the AIM stick or FIRE) | A / D or ← → |
 | Aim (laser sight) | The AIM stick in the bottom-left (always visible). Touching the stick aims only — it never moves you. | — |
-| Shoot | Tap with a second finger, or a quick tap while standing still | Space |
+| Shoot | The FIRE button in the bottom-right (hold to keep firing, tap for one shot). A touch on FIRE never moves you. You can also tap with a second finger, or a quick tap while standing still. | Space |
 | Reload | Happens automatically when the clip is empty | R |
 | Pause | ⏸ | Esc / P |
 
