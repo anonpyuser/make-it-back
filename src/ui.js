@@ -30,10 +30,6 @@ export function updateHud() {
   const W = weapon(), A = ammo();
   setText('hudWeapon', W.name.toUpperCase());
   setText('hudAmmo', `${A.mag} / ${A.reserve}`);
-  const swap = $('btnSwap');
-  const many = (save.weapons || []).length > 1;
-  swap.classList.toggle('hidden', !many);
-  swap.hidden = !many;
   const rb = $('hudReload');
   if (G.reloadT > 0) { rb.style.visibility = 'visible'; rb.firstElementChild.style.width = `${(1 - G.reloadT / W.reload) * 100}%`; }
   else if (rb.style.visibility !== 'hidden') rb.style.visibility = 'hidden';
@@ -60,7 +56,9 @@ export function goTitle() {
 function releaseInputs() {
   const { input } = ctx;
   input.left = input.right = input.fire = false;
-  document.querySelectorAll('.ctl.pressed').forEach(el => el.classList.remove('pressed'));
+  input.aimYaw = 0; input.aimPitch = 0;
+  playPointers.clear();
+  resetStickKnob();
 }
 export function togglePause() {
   if (ctx.state === 'playing') { ctx.state = 'paused'; releaseInputs(); show('pause'); }
@@ -69,26 +67,146 @@ export function togglePause() {
 function refreshMute() { $('btnMute').textContent = isMuted() ? '🔇' : '🔊'; }
 
 // ----- input -----
-function bindHold(id, key) {
-  const el = $(id);
-  const on = (e) => { e.preventDefault(); unlockAudio(); ctx.input[key] = true; el.classList.add('pressed'); };
-  const off = (e) => { e.preventDefault(); ctx.input[key] = false; el.classList.remove('pressed'); };
-  el.addEventListener('pointerdown', on);
-  el.addEventListener('pointerup', off);
-  el.addEventListener('pointercancel', off);
-  el.addEventListener('pointerleave', off);
-  el.addEventListener('contextmenu', (e) => e.preventDefault());
-}
 const tap = (id, fn) => $(id).addEventListener('click', () => { unlockAudio(); fn(); });
 
-export function initUI() {
-  bindHold('btnLeft', 'left');
-  bindHold('btnRight', 'right');
-  bindHold('btnFire', 'fire');
-  $('btnReload').addEventListener('pointerdown', (e) => { e.preventDefault(); startReload(); });
-  $('btnSwap').addEventListener('pointerdown', (e) => { e.preventDefault(); swapWeapon(); });
+// ----- play controls: always-visible aim stick (bottom left), half-screen hold to move,
+// second-finger or quick tap to fire. A touch that starts on the stick never moves him.
+const AIM_YAW_MAX = 0.7;
+const AIM_PITCH_MAX = 0.4;
+const TAP_MS = 220;
+const TAP_MOVE_PX = 18;
+const KNOB_TRAVEL = 36;
+const playPointers = new Map();
+let tapFireUntil = 0;
 
+function resetStickKnob() {
+  const knob = $('aimKnob');
+  const stick = $('aimStick');
+  if (knob) knob.style.transform = 'translate(0px, 0px)';
+  if (stick) stick.classList.remove('active');
+}
+
+function isHudChrome(el) {
+  return !!(el && el.closest && el.closest('.icon-btn, #btnPause, #btnMute, #pause, #search, #gameover, #title, .btn'));
+}
+
+// Hit-test the visible stick (plus a little padding) in screen space.
+function isOnAimStick(el, x, y) {
+  const stick = $('aimStick');
+  if (!stick || stick.closest('.hidden')) return false;
+  if (el && el.closest && el.closest('#aimStick')) return true;
+  const r = stick.getBoundingClientRect();
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const rad = Math.max(r.width, r.height) / 2 + 10;
+  const dx = x - cx, dy = y - cy;
+  return dx * dx + dy * dy <= rad * rad;
+}
+
+function stickCenter() {
+  const r = $('aimStick').getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2, rad: Math.max(r.width, r.height) / 2 };
+}
+
+function applyStick(x, y) {
+  const { x: cx, y: cy, rad } = stickCenter();
+  let dx = x - cx, dy = y - cy;
+  const len = Math.hypot(dx, dy) || 1;
+  const used = Math.min(len, rad);
+  dx = (dx / len) * used;
+  dy = (dy / len) * used;
+  const nx = dx / rad, ny = dy / rad;
+  const knob = $('aimKnob');
+  if (knob) knob.style.transform = `translate(${nx * KNOB_TRAVEL}px, ${ny * KNOB_TRAVEL}px)`;
+  // Stick right aims right (negative yaw: character faces -Z). Stick up aims up.
+  ctx.input.aimYaw = Math.max(-AIM_YAW_MAX, Math.min(AIM_YAW_MAX, -nx * AIM_YAW_MAX));
+  ctx.input.aimPitch = Math.max(-AIM_PITCH_MAX, Math.min(0.35, -ny * AIM_PITCH_MAX));
+}
+
+function syncMoveFire() {
   const input = ctx.input;
+  let left = false, right = false, fire = false;
+  for (const p of playPointers.values()) {
+    if (p.kind === 'moveLeft') left = true;
+    if (p.kind === 'moveRight') right = true;
+    if (p.kind === 'fire') fire = true;
+  }
+  if (performance.now() < tapFireUntil) fire = true;
+  input.left = left;
+  input.right = right;
+  input.fire = fire;
+}
+
+function pulseFire() {
+  tapFireUntil = performance.now() + 90;
+  ctx.input.fire = true;
+  setTimeout(syncMoveFire, 100);
+}
+
+function initPlayControls(input) {
+  const onDown = (e) => {
+    if (ctx.state !== 'playing') return;
+    if (isHudChrome(e.target)) return;
+    const x = e.clientX, y = e.clientY;
+    if (x == null || y == null) return;
+    e.preventDefault();
+    unlockAudio();
+    if (isOnAimStick(e.target, x, y)) {
+      playPointers.set(e.pointerId, { kind: 'aim', t0: performance.now() });
+      $('aimStick')?.classList.add('active');
+      applyStick(x, y);
+      return;
+    }
+    const busy = [...playPointers.values()].some((p) => p.kind === 'moveLeft' || p.kind === 'moveRight' || p.kind === 'aim');
+    if (busy) {
+      playPointers.set(e.pointerId, { kind: 'fire', t0: performance.now() });
+      syncMoveFire();
+      return;
+    }
+    const kind = x < innerWidth / 2 ? 'moveLeft' : 'moveRight';
+    playPointers.set(e.pointerId, { kind, startX: x, startY: y, t0: performance.now(), maybeTap: true });
+    syncMoveFire();
+  };
+  const onMove = (e) => {
+    const p = playPointers.get(e.pointerId);
+    if (!p || ctx.state !== 'playing') return;
+    if (p.kind === 'aim') {
+      e.preventDefault();
+      applyStick(e.clientX, e.clientY);
+      return;
+    }
+    if (p.maybeTap) {
+      const dx = e.clientX - p.startX, dy = e.clientY - p.startY;
+      if (Math.hypot(dx, dy) > TAP_MOVE_PX) p.maybeTap = false;
+    }
+  };
+  const onUp = (e) => {
+    const p = playPointers.get(e.pointerId);
+    if (!p) return;
+    const held = performance.now() - p.t0;
+    if (p.kind === 'aim') {
+      resetStickKnob();
+      input.aimYaw = 0;
+      input.aimPitch = 0;
+    } else if (p.maybeTap && held <= TAP_MS && (p.kind === 'moveLeft' || p.kind === 'moveRight')) {
+      playPointers.delete(e.pointerId);
+      syncMoveFire();
+      pulseFire();
+      return;
+    }
+    playPointers.delete(e.pointerId);
+    syncMoveFire();
+  };
+  addEventListener('pointerdown', onDown, { passive: false });
+  addEventListener('pointermove', onMove, { passive: false });
+  addEventListener('pointerup', onUp);
+  addEventListener('pointercancel', onUp);
+}
+
+
+export function initUI() {
+  const input = ctx.input;
+  initPlayControls(input);
+
   addEventListener('keydown', (e) => {
     if (e.repeat) return;
     const k = e.key.toLowerCase();
@@ -127,39 +245,6 @@ export function initUI() {
   tap('btnNextWave', () => { sfx.click(); startWave(); });
   tap('btnRetry', () => { sfx.click(); ctx.save = loadSave() || newSave(); startWave(); });
   tap('btnGoTitle', () => { sfx.click(); goTitle(); });
-
-  // Drag on the right side of the screen (or on FIRE) to aim the laser sight.
-  const aimFromEvent = (e) => {
-    const t = e.changedTouches ? e.changedTouches[0] : e;
-    return t;
-  };
-  let aiming = false, lastX = 0, lastY = 0;
-  const canAimFrom = (e) => {
-    if (ctx.state !== 'playing') return false;
-    const t = e.target;
-    if (t && t.closest && t.closest('.ctl') && t.id !== 'btnFire' && !t.closest('#btnFire')) return false;
-    const x = (e.changedTouches ? e.changedTouches[0] : e).clientX;
-    if (t && t.closest && t.closest('#btnFire')) return true;
-    return x >= innerWidth * 0.42;
-  };
-  const onAimDown = (e) => {
-    if (!canAimFrom(e)) return;
-    const t = aimFromEvent(e);
-    aiming = true; lastX = t.clientX; lastY = t.clientY;
-  };
-  const onAimMove = (e) => {
-    if (!aiming || ctx.state !== 'playing') return;
-    const t = aimFromEvent(e);
-    const dx = t.clientX - lastX, dy = t.clientY - lastY;
-    lastX = t.clientX; lastY = t.clientY;
-    input.aimYaw = Math.max(-0.7, Math.min(0.7, input.aimYaw - dx * 0.005));
-    input.aimPitch = Math.max(-0.4, Math.min(0.35, input.aimPitch - dy * 0.004));
-  };
-  const onAimUp = () => { aiming = false; };
-  addEventListener('pointerdown', onAimDown);
-  addEventListener('pointermove', onAimMove);
-  addEventListener('pointerup', onAimUp);
-  addEventListener('pointercancel', onAimUp);
 
   refreshMute();
 }

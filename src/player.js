@@ -419,33 +419,12 @@ export function updateLaser() {
   ud.laser.dot.position.copy(_end);
 }
 
-const _lookQ = new THREE.Quaternion();
-const _lookE = new THREE.Euler();
-function applyBoneLook(bone, pitch, yaw) {
-  if (!bone?.quaternion) return;
-  // If the mixer did not just write this bone, restore the rest pose first
-  // so the look offset cannot accumulate across frames.
-  if (bone.userData.lookFromMixer) {
-    bone.userData.lookFromMixer = false;
-  } else if (bone.userData.restQ) {
-    bone.quaternion.copy(bone.userData.restQ);
-  }
-  _lookE.set(pitch, yaw, 0);
-  _lookQ.setFromEuler(_lookE);
-  bone.quaternion.multiply(_lookQ);
-}
-
-function applyLook(ud) {
+// Aim turns the whole character (root yaw) and the laser / gun. It must never
+// write Head, Neck, or Spine bones — that accumulated into a spin on iPhone.
+function applyAim(player, ud) {
   const yaw = THREE.MathUtils.clamp(ctx.input.aimYaw || 0, -0.7, 0.7);
   const pitch = THREE.MathUtils.clamp(ctx.input.aimPitch || 0, -0.4, 0.35);
-  if (ud.isSkinned) {
-    const spine = (ud.bones && (ud.bones.Spine2 || ud.bones.Spine1 || ud.bones.Spine)) || null;
-    applyBoneLook(spine, pitch * 0.7, yaw);
-    applyBoneLook(ud.head, pitch * 0.35, yaw * 0.35);
-  } else if (ud.head && ud.head.rotation) {
-    // Procedural head is a Group we own: set an absolute pose, never +=.
-    ud.head.rotation.set(pitch * 0.5, yaw * 0.6, 0);
-  }
+  player.rotation.y = yaw;
   if (ud.gun && ud.gunRestRot) {
     ud.gun.rotation.copy(ud.gunRestRot);
     ud.gun.rotateX(pitch * 0.4);
@@ -562,13 +541,7 @@ export function updatePlayer(dt) {
       playAnim(ud, 'idle');
     }
     ud.mixer.update(dt);
-    // Mixer just wrote absolute bone poses. Tag look targets so applyLook
-    // adds a one-shot aim offset instead of accumulating.
-    if (ud.head) ud.head.userData.lookFromMixer = true;
-    if (ud.bones) {
-      for (const b of Object.values(ud.bones)) if (b) b.userData.lookFromMixer = true;
-    }
-    applyLook(ud);
+    applyAim(player, ud);
     return;
   }
 
@@ -577,7 +550,7 @@ export function updatePlayer(dt) {
     const bob = Math.sin(t * (dir ? 10 : 1.7)) * (dir ? 0.02 : 0.01);
     if (ud.hips) ud.hips.position.y = ud.hipsRestY + bob;
     if (ud.rig) ud.rig.rotation.z = THREE.MathUtils.lerp(ud.rig.rotation.z, dir * 0.04, 0.15);
-    applyLook(ud);
+    applyAim(player, ud);
     return;
   }
 
@@ -586,7 +559,7 @@ export function updatePlayer(dt) {
     ud.legL.rotation.x = THREE.MathUtils.lerp(ud.legL.rotation.x, walk, 0.3);
     ud.legR.rotation.x = THREE.MathUtils.lerp(ud.legR.rotation.x, -walk, 0.3);
   }
-  applyLook(ud);
+  applyAim(player, ud);
 }
 
 export function notifyShot() {
@@ -597,7 +570,7 @@ export function notifyShot() {
 export function resetPlayer() {
   const { player, input } = ctx;
   if (!player) return;
-  ctx.G.px = 0; player.position.x = 0; player.rotation.z = 0;
+  ctx.G.px = 0; player.position.x = 0; player.rotation.set(0, 0, 0);
   input.aimYaw = 0; input.aimPitch = 0;
   const ud = player.userData;
   if (ud.hips) ud.hips.position.y = ud.hipsRestY || 0;

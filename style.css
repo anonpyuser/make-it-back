@@ -45,19 +45,18 @@ h2 { margin: 6px 0; font-size: 28px; font-family: Impact, "Arial Black", sans-se
 .banner.show { opacity: 1; }
 .banner small { display: block; font-size: 18px; color: var(--ink); font-family: -apple-system, sans-serif; font-weight: 700; }
 .hurt { position: absolute; inset: 0; box-shadow: inset 0 0 90px 30px rgba(200,0,0,.8); opacity: 0; transition: opacity .25s; }
-.controls { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 12px calc(env(safe-area-inset-bottom) + 14px); display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
-.ctl { pointer-events: auto; touch-action: none; border: 2px solid rgba(255,255,255,.35); background: rgba(20,18,15,.55); color: #fff;
-  border-radius: 50%; font-size: 30px; font-weight: 900; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.ctl.pressed { background: rgba(255,122,26,.55); border-color: #ffb27a; }
-.move { display: flex; gap: 10px; }
-.move .ctl { width: 78px; height: 78px; border-radius: 22px; }
-.actions { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
-.small-actions { display: flex; gap: 8px; }
-.ctl.small { width: 58px; height: 58px; font-size: 20px; border-radius: 16px; }
-.ctl.small span { font-size: 9px; letter-spacing: .5px; margin-top: 2px; }
-.ctl.fire { width: 112px; height: 112px; font-size: 22px; background: rgba(190,40,20,.55); border-color: rgba(255,140,110,.7); }
-.ctl.fire.pressed { background: rgba(255,70,30,.8); }
-.weapon-info { flex: 1; text-align: center; padding-bottom: 6px; text-shadow: 0 2px 3px #000; min-width: 0; }
+.controls { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 14px calc(env(safe-area-inset-bottom) + 16px); display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; pointer-events: none; }
+.aim-stick { pointer-events: auto; touch-action: none; position: relative; width: 122px; height: 122px; flex: 0 0 122px; z-index: 6; }
+.aim-base { position: absolute; inset: 0; border-radius: 50%;
+  border: 4px solid rgba(255, 210, 150, 0.95);
+  background: rgba(12, 10, 8, 0.62);
+  box-shadow: 0 0 0 3px rgba(0,0,0,.55), 0 4px 16px rgba(0,0,0,.45), inset 0 0 20px rgba(0,0,0,.4); }
+.aim-stick.active .aim-base { border-color: #ffb27a; box-shadow: 0 0 0 3px rgba(0,0,0,.55), 0 0 18px rgba(255,122,26,.55), inset 0 0 20px rgba(0,0,0,.4); }
+.aim-knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, #ffd7b0, #ff7a1a 58%, #b33a00);
+  border: 3px solid #ffe7cc; box-shadow: 0 3px 10px rgba(0,0,0,.55); will-change: transform; }
+.aim-label { position: absolute; left: 0; right: 0; bottom: -16px; text-align: center; font-size: 11px; font-weight: 900; letter-spacing: 1px; color: #ffd2a0; text-shadow: 0 1px 3px #000; pointer-events: none; }
+.weapon-info { pointer-events: none; flex: 1; text-align: right; padding-bottom: 10px; text-shadow: 0 2px 3px #000; min-width: 0; }
 #hudWeapon { font-weight: 900; font-size: 15px; color: var(--orange); letter-spacing: 1px; }
 #hudAmmo { font-weight: 900; font-size: 22px; }
 .reload-bar { height: 5px; margin: 4px auto 0; width: 70px; background: rgba(0,0,0,.6); border-radius: 3px; overflow: hidden; visibility: hidden; }
