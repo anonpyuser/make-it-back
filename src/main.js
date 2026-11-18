@@ -2,7 +2,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { ctx, $ } from './core.js';
 import { buildWorld } from './world.js';
-import { makePlayer, updatePlayer, debugSetAim } from './player.js';
+import { makePlayer, updatePlayer, debugSetAim, preloadCharacterAssets } from './player.js';
 import { addFoundAmmo, totalAmmo, waveAllotment, pistolStats } from './weapons.js';
 import { shotsToClearTypes } from './zombies.js';
 import { applyFind } from './search.js';
@@ -11,6 +11,8 @@ import { newSave, writeSave } from './save.js';
 import { updateWave } from './waves.js';
 import { damageZombie } from './zombies.js';
 import { initUI, goTitle, updateBanner } from './ui.js';
+
+preloadCharacterAssets();
 
 // ----- renderer / scene -----
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -91,6 +93,33 @@ window.__mib = {
   get player() { return ctx.player; },
   get camera() { return ctx.camera; },
   setCamHold(v) { ctx.camHold = !!v; },
+  headPose() {
+    const head = ctx.player?.userData?.head;
+    if (!head) return null;
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    head.updateWorldMatrix(true, false);
+    head.getWorldQuaternion(q);
+    e.setFromQuaternion(q, 'YXZ');
+    return {
+      skinned: !!ctx.player.userData.isSkinned,
+      placeholder: !!ctx.player.userData.placeholder,
+      animsReady: !!ctx.player.userData.animsReady,
+      lx: head.rotation.x, ly: head.rotation.y, lz: head.rotation.z,
+      wx: e.x, wy: e.y, wz: e.z,
+    };
+  },
+  characterState() {
+    const ud = ctx.player?.userData || {};
+    return {
+      ready: !!ud.ready,
+      isSkinned: !!ud.isSkinned,
+      isProcedural: !!ud.isProcedural,
+      placeholder: !!ud.placeholder,
+      animsReady: !!ud.animsReady,
+      clip: ud.currentClip || null,
+    };
+  },
   findAmmo(n) { const v = addFoundAmmo(ctx.save, n); writeSave(ctx.save); return v; },
   applyFind(kind, extra) { return applyFind(ctx.save, kind, extra); },
   totalAmmo() { return totalAmmo(ctx.save); },

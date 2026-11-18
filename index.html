@@ -13,7 +13,9 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=dev">
+<link rel="preload" href="assets/character-mobile.glb?v=dev" as="fetch" crossorigin>
+<link rel="preload" href="assets/animations.glb?v=dev" as="fetch" crossorigin>
 </head>
 <body>
 <div id="game"></div>
@@ -110,7 +112,7 @@
   }
 }
 </script>
-<script type="module" src="src/main.js"></script>
+<script type="module" src="src/main.js?v=dev"></script>
 
 </body>
 </html>
