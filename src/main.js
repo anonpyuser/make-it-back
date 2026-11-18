@@ -18,7 +18,7 @@ preloadCharacterAssets();
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 let pixelRatio = Math.min(window.devicePixelRatio || 1, 2); // capped for iPhone performance
 renderer.setPixelRatio(pixelRatio);
-renderer.setSize(innerWidth, innerHeight);
+renderer.setSize(innerWidth, innerHeight, false);
 $('game').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -29,16 +29,33 @@ ctx.player = makePlayer();
 scene.add(ctx.player);
 initEffects(scene);
 
-function resize() {
-  const aspect = innerWidth / innerHeight;
-  camera.aspect = aspect;
-  // portrait phones: widen vertical FOV so enough of the room is visible side to side
-  const vfov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(26)) / aspect);
-  camera.fov = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(vfov), 55, 80);
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+function viewSize() {
+  const vv = window.visualViewport;
+  const w = Math.max(1, Math.round(vv?.width ?? innerWidth));
+  const h = Math.max(1, Math.round(vv?.height ?? innerHeight));
+  return { w, h };
 }
+
+function resize() {
+  const { w, h } = viewSize();
+  const aspect = w / h;
+  camera.aspect = aspect;
+  // Tall portrait: keep a usable horizontal FOV without dumping half the screen into the near floor.
+  const hfov = THREE.MathUtils.degToRad(48);
+  const vfov = 2 * Math.atan(Math.tan(hfov / 2) / aspect);
+  camera.fov = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(vfov), 48, 68);
+  camera.updateProjectionMatrix();
+  // false: leave CSS to stretch the canvas over #game (100dvh), so a stale inline
+  // height cannot leave a black band under the 3D view on iOS Safari.
+  renderer.setSize(w, h, false);
+}
+
 addEventListener('resize', resize);
+addEventListener('orientationchange', () => setTimeout(resize, 80));
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', resize);
+  visualViewport.addEventListener('scroll', resize);
+}
 resize();
 
 // ----- camera: orbit the kid on the title screen, follow behind him in game -----
@@ -51,8 +68,9 @@ function updateCamera(dt) {
     return;
   }
   camera.position.x = THREE.MathUtils.lerp(camera.position.x, ctx.G.px * 0.55, Math.min(1, dt * 6));
-  camera.position.y = 2.9; camera.position.z = 5.0;
-  camera.lookAt(camera.position.x * 0.6, -0.1, -9);
+  // Closer and a bit lower so Aj reads larger and the hallway fills a tall phone.
+  camera.position.y = 1.92; camera.position.z = 3.25;
+  camera.lookAt(camera.position.x * 0.55, 1.12, -8.2);
 }
 
 // ----- adaptive resolution: drop pixel ratio if frames are slow -----
@@ -62,7 +80,9 @@ function adaptPerf(dt) {
   if (perfAcc > 2) {
     if (perfAcc / perfFrames > 1 / 45 && pixelRatio > 1) {
       pixelRatio = Math.max(1, pixelRatio - 0.25);
-      renderer.setPixelRatio(pixelRatio); renderer.setSize(innerWidth, innerHeight);
+      renderer.setPixelRatio(pixelRatio);
+      const { w, h } = viewSize();
+      renderer.setSize(w, h, false);
     }
     perfAcc = 0; perfFrames = 0;
   }
@@ -96,6 +116,43 @@ window.__mib = {
   inputState() {
     const i = ctx.input;
     return { left: !!i.left, right: !!i.right, fire: !!i.fire, aimYaw: i.aimYaw || 0, aimPitch: i.aimPitch || 0, px: ctx.G.px };
+  },
+  // Step the player at a fixed 60Hz and record the Head local quaternion.
+  // Used to catch a wraparound spin that a slow rAF yaw-range sample can miss.
+  sampleHeadQuat(dir, seconds = 3, hz = 60) {
+    const input = ctx.input;
+    const prev = { left: input.left, right: input.right };
+    input.left = dir === 'left';
+    input.right = dir === 'right';
+    const head = ctx.player?.userData?.head;
+    const dt = 1 / hz;
+    const frames = Math.max(1, Math.round(seconds * hz));
+    const q = new THREE.Quaternion();
+    const p = new THREE.Quaternion();
+    const samples = [];
+    let maxStep = 0, acc = 0, flips = 0;
+    for (let i = 0; i < frames; i++) {
+      updatePlayer(dt);
+      if (!head) continue;
+      q.copy(head.quaternion).normalize();
+      let ang = 0, dot = 1;
+      if (samples.length) {
+        p.set(samples[samples.length - 1].x, samples[samples.length - 1].y, samples[samples.length - 1].z, samples[samples.length - 1].w);
+        dot = p.x * q.x + p.y * q.y + p.z * q.z + p.w * q.w;
+        if (dot < 0) flips++;
+        ang = p.angleTo(q);
+        if (ang > maxStep) maxStep = ang;
+        acc += ang;
+      }
+      samples.push({ i, t: i * dt, x: q.x, y: q.y, z: q.z, w: q.w, ang, dot });
+    }
+    input.left = prev.left; input.right = prev.right;
+    return {
+      n: samples.length, dir, seconds, hz,
+      maxStep, acc, flips,
+      skinned: !!ctx.player?.userData?.isSkinned,
+      clip: ctx.player?.userData?.currentClip || null,
+    };
   },
   headPose() {
     const head = ctx.player?.userData?.head;

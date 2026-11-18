@@ -71,6 +71,32 @@ if (stickVis.ok && (stickVis.vis === 'hidden' || stickVis.display === 'none' || 
 }
 await page.screenshot({ path: out + '12-joystick.png' });
 
+const layout = await page.evaluate(() => {
+  const canvas = document.querySelector('#game canvas');
+  const fire = document.getElementById('btnFire');
+  const cr = canvas.getBoundingClientRect();
+  const fr = fire ? fire.getBoundingClientRect() : null;
+  const meta = document.querySelector('meta[name="viewport"]')?.content || '';
+  return {
+    vw: innerWidth, vh: innerHeight,
+    canvas: { x: cr.x, y: cr.y, w: cr.width, h: cr.height },
+    fire: fr ? { w: fr.width, h: fr.height, x: fr.x, y: fr.y, text: fire.textContent.trim(), vis: getComputedStyle(fire).visibility, display: getComputedStyle(fire).display } : null,
+    viewportFit: /viewport-fit=cover/.test(meta),
+    hudTop: getComputedStyle(document.querySelector('.hud-top')).top,
+    css: document.documentElement.style,
+  };
+});
+console.log('layout', JSON.stringify(layout));
+if (layout.canvas.h < layout.vh * 0.95 || layout.canvas.w < layout.vw * 0.95) {
+  errors.push(`[test] canvas does not fill the screen (${layout.canvas.w}x${layout.canvas.h} vs ${layout.vw}x${layout.vh})`);
+}
+if (Math.abs(layout.canvas.y) > 2) errors.push(`[test] canvas does not start at the top (y=${layout.canvas.y})`);
+if (!layout.fire) errors.push('[test] FIRE button missing');
+if (layout.fire && (layout.fire.w < 90 || layout.fire.h < 90 || layout.fire.vis === 'hidden' || layout.fire.display === 'none')) {
+  errors.push(`[test] FIRE button not clearly visible (${JSON.stringify(layout.fire)})`);
+}
+if (!layout.viewportFit) errors.push('[test] viewport-fit=cover missing from the viewport meta');
+
 const pxBefore = await page.evaluate(() => __mib.G.px);
 const stick = await page.evaluate(() => {
   const r = document.getElementById('aimStick').getBoundingClientRect();
@@ -86,6 +112,24 @@ if (Math.abs(afterStick.px - pxBefore) > 0.05) errors.push(`[test] aim-stick tou
 if (Math.abs(afterStick.aimYaw) < 0.05) errors.push('[test] aim-stick drag did not change aimYaw');
 await page.screenshot({ path: out + '13-joystick-aim.png' });
 await ptr('pointerup', 7, stick.x + 40, stick.y);
+await page.waitForTimeout(100);
+
+const pxBeforeFire = await page.evaluate(() => __mib.G.px);
+const firePos = await page.evaluate(() => {
+  const r = document.getElementById('btnFire').getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
+const ammoBeforeFire = await page.evaluate(() => __mib.totalAmmo());
+await ptr('pointerdown', 9, firePos.x, firePos.y);
+await page.waitForTimeout(400);
+const afterFire = await page.evaluate(() => ({ ...__mib.inputState(), ammo: __mib.totalAmmo() }));
+console.log('after FIRE hold', JSON.stringify(afterFire), 'pxBefore', pxBeforeFire);
+if (afterFire.left || afterFire.right) errors.push('[test] FIRE-button touch started a move (left/right was set)');
+if (Math.abs(afterFire.px - pxBeforeFire) > 0.05) errors.push(`[test] FIRE-button touch moved the player (px ${pxBeforeFire} -> ${afterFire.px})`);
+if (!afterFire.fire) errors.push('[test] FIRE-button hold did not set input.fire');
+if (afterFire.ammo >= ammoBeforeFire) errors.push(`[test] FIRE-button hold did not spend ammo (${ammoBeforeFire} -> ${afterFire.ammo})`);
+await page.screenshot({ path: out + '14-fire.png' });
+await ptr('pointerup', 9, firePos.x, firePos.y);
 await page.waitForTimeout(100);
 
 // Head bone samples while strafing LEFT then RIGHT for 5s each.
@@ -130,6 +174,27 @@ await page.waitForTimeout(200);
 await ptr('pointerdown', 12, rightMove.x, rightMove.y);
 reportHead('strafe-right-5s', await sampleHead(5000));
 await ptr('pointerup', 12, rightMove.x, rightMove.y);
+
+// 60Hz Head local-quaternion sample: consecutive-frame angle must stay small,
+// and accumulated rotation must not look like a continuous 360° spin.
+const headQuat = async (dir) => page.evaluate((dir) => __mib.sampleHeadQuat(dir, 3, 60), dir);
+for (const dir of ['left', 'right']) {
+  const r = await headQuat(dir);
+  console.log('head quat 60Hz', dir, JSON.stringify(r));
+  if (!r.n) errors.push(`[test] no 60Hz head samples (${dir})`);
+  if (r.maxStep > 0.2) errors.push(`[test] ${dir} strafe: head quat jumped ${r.maxStep.toFixed(3)} rad between frames`);
+  if (r.acc > 2.0) errors.push(`[test] ${dir} strafe: head accumulated ${r.acc.toFixed(3)} rad over 3s — head is spinning`);
+  if (r.flips > 0) errors.push(`[test] ${dir} strafe: ${r.flips} quaternion sign flips between frames`);
+}
+const trans = await page.evaluate(() => {
+  const a = __mib.sampleHeadQuat('idle', 0.3, 60);
+  const b = __mib.sampleHeadQuat('left', 0.5, 60);
+  const c = __mib.sampleHeadQuat('idle', 0.3, 60);
+  return { into: b, out: c, maxStep: Math.max(a.maxStep, b.maxStep, c.maxStep), acc: a.acc + b.acc + c.acc, flips: a.flips + b.flips + c.flips };
+});
+console.log('head quat idle<->strafe', JSON.stringify(trans));
+if (trans.maxStep > 0.35) errors.push(`[test] idle↔strafe crossfade jumped the head ${trans.maxStep.toFixed(3)} rad`);
+if (trans.flips > 0) errors.push(`[test] idle↔strafe crossfade had ${trans.flips} quat sign flips`);
 
 // mid-strafe still (already captured 07). Second-finger tap to shoot.
 await ptr('pointerdown', 11, leftMove.x, leftMove.y);
