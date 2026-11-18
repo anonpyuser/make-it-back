@@ -1,0 +1,153 @@
+// Daytime scavenging: locations, loot tables, and the search screen.
+import { ctx, $ } from './core.js';
+import { PLAYER_MAX, BARRICADE_MAX, MAX_SURVIVORS } from './config.js';
+import { writeSave } from './save.js';
+import { sfx } from './audio.js';
+import { WEAPONS } from './weapons.js';
+import { show } from './ui.js';
+
+// loot tables: [weight, kind, extra]
+export const LOCATIONS = [
+  { id: 'houses',   name: 'Houses',         icon: '🏚️', hours: 2, desc: 'Quick search. Scraps, a little ammo, maybe a survivor.',
+    loot: [[3, 'ammo', 'any'], [3, 'repair', 60], [2, 'medkit', 25], [2, 'survivor'], [1, 'weapon', 'shotgun'], [2, 'nothing']] },
+  { id: 'gas',      name: 'Gas Station',    icon: '⛽', hours: 2, desc: 'Snacks, tools, sometimes a scared survivor.',
+    loot: [[3, 'medkit', 20], [3, 'repair', 70], [2, 'ammo', 'any'], [2, 'survivor'], [1, 'weapon', 'smg'], [2, 'nothing']] },
+  { id: 'hardware', name: 'Hardware Store', icon: '🔨', hours: 3, desc: 'Lumber and nails: big barricade repairs.',
+    loot: [[6, 'repair', 160], [2, 'ammo', 'shotgun'], [1, 'weapon', 'shotgun'], [1, 'survivor'], [1, 'nothing']] },
+  { id: 'hospital', name: 'Hospital',       icon: '🏥', hours: 3, desc: 'Med kits and survivors hiding inside.',
+    loot: [[5, 'medkit', 50], [3, 'survivor'], [1, 'ammo', 'any'], [1, 'nothing']] },
+  { id: 'police',   name: 'Police Station', icon: '🚓', hours: 4, desc: 'Dangerous, but full of guns and ammo.',
+    loot: [[4, 'ammo', 'any'], [3, 'weapon', 'rifle'], [2, 'weapon', 'smg'], [2, 'weapon', 'shotgun'], [1, 'survivor']] },
+];
+
+function pick(table) {
+  const total = table.reduce((s, r) => s + r[0], 0);
+  let r = Math.random() * total;
+  for (const row of table) { r -= row[0]; if (r <= 0) return row; }
+  return table[table.length - 1];
+}
+
+// Rolls 1-3 finds for a location and applies them to the save. Returns text lines.
+export function scavenge(save, loc) {
+  const finds = [];
+  const rolls = 1 + (Math.random() < 0.6 ? 1 : 0) + (Math.random() < 0.25 ? 1 : 0);
+  for (let i = 0; i < rolls; i++) {
+    const [, kind, extra] = pick(loc.loot);
+    finds.push(applyFind(save, kind, extra));
+  }
+  return finds;
+}
+
+function applyFind(save, kind, extra) {
+  switch (kind) {
+    case 'weapon': {
+      if (!save.weapons.includes(extra)) {
+        save.weapons.push(extra);
+        save.ammo[extra] = { mag: WEAPONS[extra].mag, reserve: WEAPONS[extra].mag * 2 };
+        return { icon: '🔫', text: `Found a ${WEAPONS[extra].name}!`, good: true };
+      }
+      return applyFind(save, 'ammo', extra);
+    }
+    case 'ammo': {
+      const owned = save.weapons.filter(w => !WEAPONS[w].infinite);
+      if (!owned.length) return applyFind(save, 'repair', 40);
+      const w = extra !== 'any' && owned.includes(extra) ? extra : owned[(Math.random() * owned.length) | 0];
+      const W = WEAPONS[w];
+      const amt = Math.round(W.mag * (1 + Math.random() * 1.5));
+      const a = save.ammo[w];
+      a.reserve = Math.min(W.maxReserve, a.reserve + amt);
+      return { icon: '📦', text: `+${amt} ${W.name} ammo`, good: true };
+    }
+    case 'repair': {
+      if (save.barricade >= BARRICADE_MAX) return { icon: '🪵', text: 'Found boards, but the barricade is already at full strength.', good: false };
+      const amt = Math.round(extra * (0.8 + Math.random() * 0.4));
+      const before = save.barricade;
+      save.barricade = Math.min(BARRICADE_MAX, save.barricade + amt);
+      return { icon: '🪵', text: `Boards & nails: barricade +${save.barricade - before}`, good: true };
+    }
+    case 'medkit': {
+      if (save.health >= PLAYER_MAX) return applyFind(save, 'repair', 50);
+      const amt = Math.round(extra * (0.8 + Math.random() * 0.4));
+      const before = save.health;
+      save.health = Math.min(PLAYER_MAX, save.health + amt);
+      return { icon: '🩹', text: `Med kit: health +${save.health - before}`, good: true };
+    }
+    case 'survivor': {
+      if (save.survivors < MAX_SURVIVORS) {
+        save.survivors++;
+        return { icon: '🧍', text: 'A survivor joined you! They will shoot zombies.', good: true };
+      }
+      return applyFind(save, 'ammo', 'any');
+    }
+    default:
+      return { icon: '💨', text: 'Nothing useful here.', good: false };
+  }
+}
+
+
+export function openSearch() {
+  ctx.state = 'search';
+  show('search');
+  $('search').scrollTop = 0;
+  renderSearch();
+}
+
+function renderSearch() {
+  const save = ctx.save;
+  $('searchTitle').textContent = `Wave ${save.wave - 1} survived`;
+  $('hoursLeft').textContent = save.hoursLeft;
+  $('sHp').textContent = save.health;
+  $('sBc').textContent = save.barricade;
+  $('sSurv').textContent = save.survivors;
+  const locs = $('locations');
+  locs.innerHTML = '';
+  for (const L of LOCATIONS) {
+    const b = document.createElement('button');
+    b.className = 'loc';
+    b.disabled = L.hours > save.hoursLeft;
+    b.innerHTML = `<div class="ic">${L.icon}</div><div class="nm">${L.name}</div><div class="hr">${L.hours} hrs</div><div class="ds">${L.desc}</div>`;
+    b.addEventListener('click', () => doSearch(L, b));
+    locs.appendChild(b);
+  }
+  $('btnRepair').disabled = save.hoursLeft < 1 || save.barricade >= BARRICADE_MAX;
+  const lf = save.lastFinds || [];
+  $('finds').innerHTML = lf.length
+    ? `<div class="finds-h">${lf[0]}</div>` + lf.slice(1).map(f => `<div class="find ${f.good ? 'good' : 'bad'}">${f.icon} ${f.text}</div>`).join('')
+    : '<div class="finds-h dim">Pick a place to search.</div>';
+  $('arsenal').innerHTML = '<b>Your guns:</b> ' + save.weapons.map(w => {
+    const W = WEAPONS[w], A = save.ammo[w];
+    return `${W.name} (${W.infinite ? '∞' : A.mag + A.reserve})`;
+  }).join(' · ');
+  $('btnNextWave').textContent = `Start Wave ${save.wave} ▶`;
+}
+
+let searching = false;
+function doSearch(L, btn) {
+  const save = ctx.save;
+  if (searching || L.hours > save.hoursLeft) return;
+  searching = true;
+  sfx.click();
+  btn.classList.add('searching');
+  btn.querySelector('.hr').textContent = 'Searching…';
+  setTimeout(() => {
+    save.hoursLeft -= L.hours;
+    const finds = scavenge(save, L);
+    save.lastFinds = [`${L.icon} You searched the ${L.name}:`, ...finds];
+    writeSave(save);
+    searching = false;
+    if (finds.some(f => f.good)) sfx.pickup();
+    renderSearch();
+  }, 700);
+}
+
+export function repairBarricade() {
+  const save = ctx.save;
+  if (save.hoursLeft < 1) return;
+  sfx.click();
+  save.hoursLeft -= 1;
+  const before = save.barricade;
+  save.barricade = Math.min(BARRICADE_MAX, save.barricade + 50);
+  save.lastFinds = ['🔨 You spent an hour on the barricade:', { icon: '🪵', text: `Barricade +${save.barricade - before}`, good: true }];
+  writeSave(save);
+  renderSearch();
+}
