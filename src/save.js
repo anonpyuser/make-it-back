@@ -17,21 +17,28 @@ export function newSave() {
     barricade: BARRICADE_MAX,
     survivors: 0,
     weapons: ['pistol'],
-    ammo: { pistol: { mag: 12, reserve: 0 } },
+    ammo: { pistol: { mag: 0, reserve: 0 } },
     current: 'pistol',
     upgrades: emptyUpgrades(),
+    stashAmmo: 0,           // leftover + found rounds carried into the next wave
     kills: 0,
     lastFinds: [],
   };
 }
 
-// Older saves could still list other guns. Fold everything back to a pistol-only run.
+// Older saves could still list other guns or use infinite pistol ammo.
 export function migrateSave(s) {
   if (!s || typeof s !== 'object') return null;
-  s.weapons = ['pistol'];
-  s.current = 'pistol';
-  const mag = (s.ammo && s.ammo.pistol && typeof s.ammo.pistol.mag === 'number') ? s.ammo.pistol.mag : 12;
-  s.ammo = { pistol: { mag, reserve: 0 } };
+  const allowed = new Set(['pistol', 'revolver', 'auto']);
+  const owned = Array.isArray(s.weapons) ? s.weapons.filter((id) => allowed.has(id)) : [];
+  s.weapons = owned.length ? [...new Set(owned)] : ['pistol'];
+  if (!s.weapons.includes('pistol')) s.weapons.unshift('pistol');
+  s.current = allowed.has(s.current) && s.weapons.includes(s.current) ? s.current : s.weapons[0];
+  const prev = s.ammo && s.ammo.pistol && typeof s.ammo.pistol === 'object' ? s.ammo.pistol : {};
+  const mag = typeof prev.mag === 'number' ? prev.mag : 0;
+  const reserve = typeof prev.reserve === 'number' ? prev.reserve : 0;
+  s.ammo = { pistol: { mag, reserve } };
+  s.stashAmmo = Math.max(0, (s.stashAmmo | 0));
   const u = s.upgrades && typeof s.upgrades === 'object' ? s.upgrades : {};
   s.upgrades = emptyUpgrades();
   for (const k of Object.keys(s.upgrades)) {

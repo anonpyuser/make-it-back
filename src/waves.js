@@ -3,10 +3,10 @@ import { ctx } from './core.js';
 import { BARRICADE_MAX, DAY_HOURS } from './config.js';
 import { writeSave, recordBest, bestWave } from './save.js';
 import { sfx } from './audio.js';
-import { spawnZombie, updateZombies } from './zombies.js';
+import { spawnZombie, updateZombies, planWaveTypes } from './zombies.js';
 import { spawnSurvivors, updateSurvivors } from './survivors.js';
 import { updatePlayer, resetPlayer } from './player.js';
-import { updateWeapons } from './weapons.js';
+import { updateWeapons, grantWaveAmmo, stashRemainingAmmo } from './weapons.js';
 import { show, showBanner, updateHud, setHurt } from './ui.js';
 import { openSearch } from './search.js';
 
@@ -34,9 +34,12 @@ export function startWave() {
   const { G, save, world } = ctx;
   clearActors();
   save.phase = 'wave';
-  writeSave(save); // "Retry this wave" restores from here
   G.cfg = waveConfig(save.wave);
-  G.toSpawn = G.cfg.count; G.spawnT = 1.5;
+  G.spawnQueue = planWaveTypes(G.cfg);
+  G.toSpawn = G.spawnQueue.length; G.spawnT = 1.5;
+  const granted = grantWaveAmmo(save, G.spawnQueue.slice(), G.cfg);
+  G.waveAllotment = granted.need;
+  writeSave(save); // "Retry this wave" restores post-grant ammo (stash already applied)
   G.health = save.health; G.barricade = save.barricade;
   G.fireCd = 0; G.reloadT = 0; G.waveEndT = -1; G.kills = 0; G.barricadeJustFell = false;
   resetPlayer();
@@ -86,6 +89,7 @@ function goToSearch() {
   save.health = Math.max(1, Math.round(G.health));
   save.barricade = Math.round(G.barricade);
   save.kills += G.kills;
+  stashRemainingAmmo(save);
   recordBest(save.wave);
   save.wave += 1;
   save.phase = 'search';
