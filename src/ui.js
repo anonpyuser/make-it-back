@@ -29,7 +29,11 @@ export function updateHud() {
   setBar('barBc', G.barricade / BARRICADE_MAX);
   const W = weapon(), A = ammo();
   setText('hudWeapon', W.name.toUpperCase());
-  setText('hudAmmo', `${A.mag} / ${W.infinite ? '∞' : A.reserve}`);
+  setText('hudAmmo', `${A.mag} / ${A.reserve}`);
+  const swap = $('btnSwap');
+  const many = (save.weapons || []).length > 1;
+  swap.classList.toggle('hidden', !many);
+  swap.hidden = !many;
   const rb = $('hudReload');
   if (G.reloadT > 0) { rb.style.visibility = 'visible'; rb.firstElementChild.style.width = `${(1 - G.reloadT / W.reload) * 100}%`; }
   else if (rb.style.visibility !== 'hidden') rb.style.visibility = 'hidden';
@@ -123,5 +127,39 @@ export function initUI() {
   tap('btnNextWave', () => { sfx.click(); startWave(); });
   tap('btnRetry', () => { sfx.click(); ctx.save = loadSave() || newSave(); startWave(); });
   tap('btnGoTitle', () => { sfx.click(); goTitle(); });
+
+  // Drag on the right side of the screen (or on FIRE) to aim the laser sight.
+  const aimFromEvent = (e) => {
+    const t = e.changedTouches ? e.changedTouches[0] : e;
+    return t;
+  };
+  let aiming = false, lastX = 0, lastY = 0;
+  const canAimFrom = (e) => {
+    if (ctx.state !== 'playing') return false;
+    const t = e.target;
+    if (t && t.closest && t.closest('.ctl') && t.id !== 'btnFire' && !t.closest('#btnFire')) return false;
+    const x = (e.changedTouches ? e.changedTouches[0] : e).clientX;
+    if (t && t.closest && t.closest('#btnFire')) return true;
+    return x >= innerWidth * 0.42;
+  };
+  const onAimDown = (e) => {
+    if (!canAimFrom(e)) return;
+    const t = aimFromEvent(e);
+    aiming = true; lastX = t.clientX; lastY = t.clientY;
+  };
+  const onAimMove = (e) => {
+    if (!aiming || ctx.state !== 'playing') return;
+    const t = aimFromEvent(e);
+    const dx = t.clientX - lastX, dy = t.clientY - lastY;
+    lastX = t.clientX; lastY = t.clientY;
+    input.aimYaw = Math.max(-0.7, Math.min(0.7, input.aimYaw - dx * 0.005));
+    input.aimPitch = Math.max(-0.4, Math.min(0.35, input.aimPitch - dy * 0.004));
+  };
+  const onAimUp = () => { aiming = false; };
+  addEventListener('pointerdown', onAimDown);
+  addEventListener('pointermove', onAimMove);
+  addEventListener('pointerup', onAimUp);
+  addEventListener('pointercancel', onAimUp);
+
   refreshMute();
 }

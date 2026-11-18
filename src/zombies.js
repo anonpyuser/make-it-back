@@ -66,11 +66,29 @@ export function makeZombie(type) {
 }
 
 
+
+export function planWaveTypes(cfg) {
+  const types = [];
+  for (let i = 0; i < cfg.count; i++) {
+    const r = Math.random();
+    types.push(r < cfg.bruteChance ? 'brute' : r < cfg.bruteChance + cfg.runnerChance ? 'runner' : 'walker');
+  }
+  return types;
+}
+
+export function shotsToClearTypes(types, hpMul, damage) {
+  const dmg = Math.max(1, damage);
+  let n = 0;
+  for (const t of types) n += Math.ceil((ZOMBIE_TYPES[t].hp * hpMul) / dmg);
+  return n;
+}
+
 export function spawnZombie() {
   const { G, scene, save } = ctx;
   const c = G.cfg;
-  const r = Math.random();
-  const type = r < c.bruteChance ? 'brute' : r < c.bruteChance + c.runnerChance ? 'runner' : 'walker';
+  const type = (G.spawnQueue && G.spawnQueue.length)
+    ? G.spawnQueue.shift()
+    : (Math.random() < c.bruteChance ? 'brute' : Math.random() < c.bruteChance + c.runnerChance ? 'runner' : 'walker');
   const TY = ZOMBIE_TYPES[type];
   const m = makeZombie(type);
   const x = (Math.random() - 0.5) * 6.6;

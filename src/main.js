@@ -2,9 +2,12 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { ctx, $ } from './core.js';
 import { buildWorld } from './world.js';
-import { makePlayer } from './player.js';
+import { makePlayer, updatePlayer, debugSetAim } from './player.js';
+import { addFoundAmmo, totalAmmo, waveAllotment, pistolStats } from './weapons.js';
+import { shotsToClearTypes } from './zombies.js';
+import { applyFind } from './search.js';
 import { initEffects, updateEffects } from './effects.js';
-import { newSave } from './save.js';
+import { newSave, writeSave } from './save.js';
 import { updateWave } from './waves.js';
 import { damageZombie } from './zombies.js';
 import { initUI, goTitle, updateBanner } from './ui.js';
@@ -38,6 +41,7 @@ resize();
 
 // ----- camera: orbit the kid on the title screen, follow behind him in game -----
 function updateCamera(dt) {
+  if (ctx.camHold) return;
   if (ctx.state === 'title') {
     const t = performance.now() / 1000;
     camera.position.set(Math.sin(t * 0.35) * 1.6, 1.55, -2.4 + Math.cos(t * 0.35) * 0.2);
@@ -67,6 +71,7 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (ctx.state === 'playing') updateWave(dt);
+  else if (ctx.state === 'title') { ctx.G.time += dt; updatePlayer(dt); }
   ctx.world.update(dt);
   updateCamera(dt);
   updateEffects(dt);
@@ -82,6 +87,19 @@ window.__mib = {
   get G() { return ctx.G; },
   get save() { return ctx.save; },
   clearWave() { ctx.G.toSpawn = 0; for (const z of ctx.G.zombies) if (!z.dead) damageZombie(z, 1e6); },
+  debugSetAim,
+  get player() { return ctx.player; },
+  get camera() { return ctx.camera; },
+  setCamHold(v) { ctx.camHold = !!v; },
+  findAmmo(n) { const v = addFoundAmmo(ctx.save, n); writeSave(ctx.save); return v; },
+  applyFind(kind, extra) { return applyFind(ctx.save, kind, extra); },
+  totalAmmo() { return totalAmmo(ctx.save); },
+  waveAllotment() { return ctx.G.waveAllotment; },
+  clip() { return ctx.player?.userData?.currentClip || null; },
+  setAim(yaw, pitch) { ctx.input.aimYaw = yaw; ctx.input.aimPitch = pitch; },
+  animsReady() { return !!(ctx.player?.userData?.animsReady); },
+  shotsToClear(types, hpMul, damage) { return shotsToClearTypes(types, hpMul, damage); },
+  pistolStats: () => pistolStats(),
 };
 
 initUI();

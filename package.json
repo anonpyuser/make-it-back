@@ -4,9 +4,10 @@
   "description": "Make It Back: a 3D zombie survival web game for iPhone Safari (Three.js, no build step).",
   "scripts": {
     "start": "python3 -m http.server 8642",
-    "test": "node tools/test.mjs && node tools/test-breach.mjs",
+    "test": "node tools/decode-assets.mjs && node tools/test.mjs && node tools/test-breach.mjs",
     "icons": "node tools/make-icons.mjs",
-    "vendor": "cp node_modules/three/build/three.module.min.js vendor/ && cp node_modules/three/LICENSE vendor/THREE-LICENSE"
+    "vendor": "cp node_modules/three/build/three.module.min.js vendor/ && cp node_modules/three/LICENSE vendor/THREE-LICENSE && mkdir -p vendor/addons/loaders vendor/addons/utils && cp node_modules/three/examples/jsm/loaders/GLTFLoader.js vendor/addons/loaders/ && cp node_modules/three/examples/jsm/utils/BufferGeometryUtils.js vendor/addons/utils/",
+    "assets": "node tools/decode-assets.mjs"
   },
   "license": "UNLICENSED",
   "type": "module",

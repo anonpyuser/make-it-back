@@ -3,21 +3,23 @@ import { ctx, $ } from './core.js';
 import { PLAYER_MAX, BARRICADE_MAX, MAX_SURVIVORS } from './config.js';
 import { writeSave } from './save.js';
 import { sfx } from './audio.js';
-import { WEAPONS } from './weapons.js';
+import { weapon, applyPistolUpgrade, givePistol, addFoundAmmo } from './weapons.js';
 import { show } from './ui.js';
 
 // loot tables: [weight, kind, extra]
+// Searching finds pistol upgrades, extra bullets, other pistols, supplies, and survivors.
 export const LOCATIONS = [
-  { id: 'houses',   name: 'Houses',         icon: '🏚️', hours: 2, desc: 'Quick search. Scraps, a little ammo, maybe a survivor.',
-    loot: [[3, 'ammo', 'any'], [3, 'repair', 60], [2, 'medkit', 25], [2, 'survivor'], [1, 'weapon', 'shotgun'], [2, 'nothing']] },
-  { id: 'gas',      name: 'Gas Station',    icon: '⛽', hours: 2, desc: 'Snacks, tools, sometimes a scared survivor.',
-    loot: [[3, 'medkit', 20], [3, 'repair', 70], [2, 'ammo', 'any'], [2, 'survivor'], [1, 'weapon', 'smg'], [2, 'nothing']] },
+  { id: 'houses',   name: 'Houses',         icon: '🏚️', hours: 2, desc: 'Quick search. Scraps, a clip of ammo, maybe a survivor.',
+    loot: [[3, 'upgrade', 'mag'], [3, 'ammo', 12], [2, 'repair', 60], [2, 'medkit', 25], [2, 'survivor'], [1, 'nothing']] },
+  { id: 'gas',      name: 'Gas Station',    icon: '⛽', hours: 2, desc: 'Snacks, tools, loose rounds, sometimes a scared survivor.',
+    loot: [[3, 'medkit', 20], [3, 'repair', 70], [3, 'ammo', 16], [2, 'upgrade', 'rate'], [2, 'survivor'], [1, 'nothing']] },
   { id: 'hardware', name: 'Hardware Store', icon: '🔨', hours: 3, desc: 'Lumber and nails: big barricade repairs.',
-    loot: [[6, 'repair', 160], [2, 'ammo', 'shotgun'], [1, 'weapon', 'shotgun'], [1, 'survivor'], [1, 'nothing']] },
+    loot: [[6, 'repair', 160], [2, 'ammo', 10], [2, 'upgrade', 'reload'], [1, 'survivor'], [1, 'nothing']] },
   { id: 'hospital', name: 'Hospital',       icon: '🏥', hours: 3, desc: 'Med kits and survivors hiding inside.',
-    loot: [[5, 'medkit', 50], [3, 'survivor'], [1, 'ammo', 'any'], [1, 'nothing']] },
-  { id: 'police',   name: 'Police Station', icon: '🚓', hours: 4, desc: 'Dangerous, but full of guns and ammo.',
-    loot: [[4, 'ammo', 'any'], [3, 'weapon', 'rifle'], [2, 'weapon', 'smg'], [2, 'weapon', 'shotgun'], [1, 'survivor']] },
+    loot: [[5, 'medkit', 50], [3, 'survivor'], [2, 'ammo', 8], [1, 'upgrade', 'reload'], [1, 'nothing']] },
+  { id: 'police',   name: 'Police Station', icon: '🚓', hours: 4, desc: 'Dangerous, but full of pistols, upgrades, and ammo.',
+    loot: [[3, 'upgrade', 'damage'], [2, 'upgrade', 'rate'], [2, 'upgrade', 'mag'], [2, 'upgrade', 'reload'],
+           [3, 'ammo', 20], [2, 'pistol', 'revolver'], [2, 'pistol', 'auto'], [2, 'survivor']] },
 ];
 
 function pick(table) {
@@ -38,28 +40,27 @@ export function scavenge(save, loc) {
   return finds;
 }
 
-function applyFind(save, kind, extra) {
+export function applyFind(save, kind, extra) {
   switch (kind) {
-    case 'weapon': {
-      if (!save.weapons.includes(extra)) {
-        save.weapons.push(extra);
-        save.ammo[extra] = { mag: WEAPONS[extra].mag, reserve: WEAPONS[extra].mag * 2 };
-        return { icon: '🔫', text: `Found a ${WEAPONS[extra].name}!`, good: true };
-      }
-      return applyFind(save, 'ammo', extra);
+    case 'upgrade': {
+      const res = applyPistolUpgrade(save, extra);
+      if (!res) return applyFind(save, 'ammo', 10);
+      if (res.maxed) return applyFind(save, 'ammo', 12);
+      return { icon: res.icon, text: `${res.text} (${res.level}/5)`, good: true };
     }
     case 'ammo': {
-      const owned = save.weapons.filter(w => !WEAPONS[w].infinite);
-      if (!owned.length) return applyFind(save, 'repair', 40);
-      const w = extra !== 'any' && owned.includes(extra) ? extra : owned[(Math.random() * owned.length) | 0];
-      const W = WEAPONS[w];
-      const amt = Math.round(W.mag * (1 + Math.random() * 1.5));
-      const a = save.ammo[w];
-      a.reserve = Math.min(W.maxReserve, a.reserve + amt);
-      return { icon: '📦', text: `+${amt} ${W.name} ammo`, good: true };
+      const amt = Math.max(1, Math.round(extra * (0.8 + Math.random() * 0.4)));
+      addFoundAmmo(save, amt);
+      return { icon: '🔹', text: `Found ${amt} pistol rounds (carries into the next wave)`, good: true };
+    }
+    case 'pistol': {
+      const res = givePistol(save, extra);
+      if (!res) return applyFind(save, 'ammo', 16);
+      if (res.already) return applyFind(save, 'ammo', 16);
+      return { icon: res.icon, text: res.text, good: true };
     }
     case 'repair': {
-      if (save.barricade >= BARRICADE_MAX) return { icon: '🪵', text: 'Found boards, but the barricade is already at full strength.', good: false };
+      if (save.barricade >= BARRICADE_MAX) return applyFind(save, 'ammo', 8);
       const amt = Math.round(extra * (0.8 + Math.random() * 0.4));
       const before = save.barricade;
       save.barricade = Math.min(BARRICADE_MAX, save.barricade + amt);
@@ -77,7 +78,7 @@ function applyFind(save, kind, extra) {
         save.survivors++;
         return { icon: '🧍', text: 'A survivor joined you! They will shoot zombies.', good: true };
       }
-      return applyFind(save, 'ammo', 'any');
+      return applyFind(save, 'ammo', 12);
     }
     default:
       return { icon: '💨', text: 'Nothing useful here.', good: false };
@@ -99,6 +100,7 @@ function renderSearch() {
   $('sHp').textContent = save.health;
   $('sBc').textContent = save.barricade;
   $('sSurv').textContent = save.survivors;
+  if ($('sAmmo')) $('sAmmo').textContent = save.stashAmmo | 0;
   const locs = $('locations');
   locs.innerHTML = '';
   for (const L of LOCATIONS) {
@@ -114,10 +116,14 @@ function renderSearch() {
   $('finds').innerHTML = lf.length
     ? `<div class="finds-h">${lf[0]}</div>` + lf.slice(1).map(f => `<div class="find ${f.good ? 'good' : 'bad'}">${f.icon} ${f.text}</div>`).join('')
     : '<div class="finds-h dim">Pick a place to search.</div>';
-  $('arsenal').innerHTML = '<b>Your guns:</b> ' + save.weapons.map(w => {
-    const W = WEAPONS[w], A = save.ammo[w];
-    return `${W.name} (${W.infinite ? '∞' : A.mag + A.reserve})`;
-  }).join(' · ');
+  const W = weapon();
+  const u = save.upgrades || { damage: 0, rate: 0, mag: 0, reload: 0 };
+  const names = (save.weapons || ['pistol']).map((id) => (
+    id === 'revolver' ? 'Revolver' : id === 'auto' ? 'Auto Pistol' : 'Pistol'
+  )).join(', ');
+  $('arsenal').innerHTML = `<b>Your ${W.name.toLowerCase()}:</b> dmg ${W.damage} · ${W.rate.toFixed(1)}/s · clip ${W.mag} · reload ${W.reload.toFixed(2)}s`
+    + `<div class="dim">Upgrades ${u.damage}/5 dmg · ${u.rate}/5 rate · ${u.mag}/5 clip · ${u.reload}/5 reload</div>`
+    + `<div class="dim">Pistols: ${names} · Carried rounds: ${save.stashAmmo | 0}</div>`;
   $('btnNextWave').textContent = `Start Wave ${save.wave} ▶`;
 }
 

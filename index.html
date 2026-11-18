@@ -54,12 +54,12 @@
     </div>
     <div class="weapon-info">
       <div id="hudWeapon">PISTOL</div>
-      <div id="hudAmmo">12 / ∞</div>
+      <div id="hudAmmo">0 / 0</div>
       <div id="hudReload" class="reload-bar"><div></div></div>
     </div>
     <div class="actions">
       <div class="small-actions">
-        <button id="btnSwap" class="ctl small" aria-label="Swap weapon">⇄<span>SWAP</span></button>
+        <button id="btnSwap" class="ctl small hidden" aria-label="Swap weapon" hidden>⇄<span>SWAP</span></button>
         <button id="btnReload" class="ctl small" aria-label="Reload">↻<span>RELOAD</span></button>
       </div>
       <button id="btnFire" class="ctl fire" aria-label="Fire">FIRE</button>
@@ -83,6 +83,7 @@
     <div>❤️ <b id="sHp">100</b></div>
     <div>🪵 <b id="sBc">500</b></div>
     <div>🧍 <b id="sSurv">0</b></div>
+    <div>🔹 <b id="sAmmo">0</b></div>
   </div>
   <div id="finds" class="finds"></div>
   <div id="locations" class="locations"></div>
@@ -101,6 +102,15 @@
 
 <div id="loading" class="screen"><p>Loading…</p></div>
 <noscript>Make It Back needs JavaScript.</noscript>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js",
+    "three/addons/": "./vendor/addons/"
+  }
+}
+</script>
 <script type="module" src="src/main.js"></script>
+
 </body>
 </html>

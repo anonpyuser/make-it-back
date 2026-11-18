@@ -5,3 +5,6 @@ _site/
 screenshots/
 # PNG icons are stored as base64 text in icons/b64/ and decoded at deploy time
 icons/*.png
+
+# GLB characters are stored as base64 text in assets/b64/ and decoded at deploy time
+assets/*.glb
