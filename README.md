@@ -77,9 +77,10 @@ npm test             # screenshots land in screenshots/
 `tools/test.mjs` expects Chrome at `/usr/bin/google-chrome`.
 
 ## Deploying
-`.github/workflows/pages.yml` publishes the site (and decodes the PNG icons from `icons/b64/`) to GitHub Pages on every push to `main`
-(repo Settings → Pages → Source: **GitHub Actions**). Any other static host works too: upload
-`index.html`, `style.css`, `manifest.webmanifest`, `src/`, `vendor/`, `icons/`.
+GitHub Pages serves the `gh-pages` branch. `.github/workflows/pages.yml` runs on every push to `main`:
+it copies the static files there and decodes the PNG icons from `icons/b64/` (binary files are kept as
+base64 text). Don't edit `gh-pages` by hand. Any other static host works too: upload
+`index.html`, `style.css`, `manifest.webmanifest`, `src/`, `vendor/`, `icons/` (with the decoded PNGs).
 
 ## Later: a real iPhone app
 The plan is to wrap this same web game with Capacitor and ship it through TestFlight once the
