@@ -11,10 +11,11 @@ page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') er
 page.on('pageerror', e => errors.push('[pageerror] ' + e.message));
 page.on('requestfailed', r => errors.push('[requestfailed] ' + r.url()));
 await page.goto(URL_, { waitUntil: 'networkidle' });
-await page.waitForFunction(() => __mib.player && __mib.player.userData && __mib.player.userData.ready, null, { timeout: 15000 });
-await page.waitForTimeout(800);
+await page.waitForFunction(() => __mib.characterState && __mib.characterState().isSkinned, null, { timeout: 20000 });
+await page.waitForFunction(() => __mib.animsReady(), null, { timeout: 15000 });
+await page.waitForTimeout(400);
 const anims = await page.evaluate(() => __mib.animsReady());
-console.log('anims ready on title:', anims);
+console.log('anims ready on title:', anims, await page.evaluate(() => __mib.characterState()));
 await page.screenshot({ path: out + '01-title.png' });
 
 await page.tap('#btnNew');
@@ -31,6 +32,48 @@ if (wave1.ammo !== wave1.allotment) {
   console.log('FAIL: wave 1 ammo should equal allotment (shots-to-clear + 10)');
 }
 if (wave1.ammo !== wave1.allotment) errors.push(`[test] wave1 ammo ${wave1.ammo} != allotment ${wave1.allotment}`);
+
+// Sample the head bone for several seconds while playing. A spinning head
+// would unwind many radians; the world yaw must stay bounded.
+const sampleHead = async (ms = 3500) => page.evaluate((ms) => new Promise((resolve) => {
+  const vals = [];
+  const t0 = performance.now();
+  const step = () => {
+    const p = __mib.headPose();
+    if (p) vals.push(p);
+    if (performance.now() - t0 < ms) requestAnimationFrame(step);
+    else resolve(vals);
+  };
+  requestAnimationFrame(step);
+}), ms);
+const headHold = page.dispatchEvent('#btnLeft', 'pointerdown', { pointerType: 'touch' }).then(() => sampleHead(3500));
+const headSamples = await headHold;
+await page.dispatchEvent('#btnLeft', 'pointerup', { pointerType: 'touch' });
+const unwrap = (angles) => {
+  if (!angles.length) return [];
+  const out = [angles[0]];
+  for (let i = 1; i < angles.length; i++) {
+    let x = angles[i], prev = out[i - 1];
+    while (x - prev > Math.PI) x -= Math.PI * 2;
+    while (prev - x > Math.PI) x += Math.PI * 2;
+    out.push(x);
+  }
+  return out;
+};
+const wys = unwrap(headSamples.map((s) => s.wy));
+const lys = unwrap(headSamples.map((s) => s.ly));
+const range = (a) => a.length ? Math.max(...a) - Math.min(...a) : 0;
+const headReport = {
+  n: headSamples.length,
+  skinned: headSamples[0] && headSamples[0].skinned,
+  wyRange: range(wys),
+  lyRange: range(lys),
+};
+console.log('head pose samples', JSON.stringify(headReport));
+if (!headSamples.length) errors.push('[test] no head pose samples');
+// A spinning head unwinds many radians; idle/strafe look should stay well under a turn.
+if (headReport.wyRange > 1.5) errors.push(`[test] head world yaw range ${headReport.wyRange.toFixed(3)} rad — head is spinning`);
+if (headReport.lyRange > 1.5) errors.push(`[test] head local yaw range ${headReport.lyRange.toFixed(3)} rad — head is spinning`);
 
 const hold = async (sel, ms) => {
   const b = await page.locator(sel).boundingBox();
