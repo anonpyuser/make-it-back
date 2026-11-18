@@ -13,7 +13,9 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=dev">
+<link rel="preload" href="assets/character-mobile.glb?v=dev" as="fetch" crossorigin>
+<link rel="preload" href="assets/animations.glb?v=dev" as="fetch" crossorigin>
 </head>
 <body>
 <div id="game"></div>
@@ -48,21 +50,15 @@
   <div id="banner" class="banner"></div>
   <div id="hurt" class="hurt"></div>
   <div class="controls">
-    <div class="move">
-      <button id="btnLeft" class="ctl" aria-label="Move left">◀</button>
-      <button id="btnRight" class="ctl" aria-label="Move right">▶</button>
+    <div id="aimStick" class="aim-stick" aria-label="Aim">
+      <div class="aim-base"></div>
+      <div id="aimKnob" class="aim-knob"></div>
+      <div class="aim-label">AIM</div>
     </div>
     <div class="weapon-info">
       <div id="hudWeapon">PISTOL</div>
       <div id="hudAmmo">0 / 0</div>
       <div id="hudReload" class="reload-bar"><div></div></div>
-    </div>
-    <div class="actions">
-      <div class="small-actions">
-        <button id="btnSwap" class="ctl small hidden" aria-label="Swap weapon" hidden>⇄<span>SWAP</span></button>
-        <button id="btnReload" class="ctl small" aria-label="Reload">↻<span>RELOAD</span></button>
-      </div>
-      <button id="btnFire" class="ctl fire" aria-label="Fire">FIRE</button>
     </div>
   </div>
 </section>
@@ -110,7 +106,7 @@
   }
 }
 </script>
-<script type="module" src="src/main.js"></script>
+<script type="module" src="src/main.js?v=dev"></script>
 
 </body>
 </html>

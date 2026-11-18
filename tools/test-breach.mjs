@@ -21,11 +21,11 @@ const start = await page.evaluate(() => ({
 console.log('weapon:', start.weapon, start.hud, JSON.stringify(start));
 if (start.total !== start.allotment) errors.push(`wave ammo ${start.total} != allotment ${start.allotment}`);
 if (/\u221e|Infinity/.test(start.hud)) errors.push(`HUD still shows infinite ammo: ${start.hud}`);
-await page.dispatchEvent('#btnFire', 'pointerdown'); await page.waitForTimeout(1500); await page.dispatchEvent('#btnFire', 'pointerup');
+await page.keyboard.down(' '); await page.waitForTimeout(1500); await page.keyboard.up(' ');
 const afterFire = await page.evaluate(() => ({ hud: document.getElementById('hudAmmo').textContent, ammo: { ...__mib.save.ammo.pistol }, total: __mib.totalAmmo() }));
 console.log('after firing:', afterFire.hud, JSON.stringify(afterFire.ammo));
 if (afterFire.total >= start.total) errors.push(`firing did not spend ammo (${start.total} -> ${afterFire.total})`);
-await page.tap('#btnReload'); await page.waitForTimeout(2000);
+await page.keyboard.press('r'); await page.waitForTimeout(2000);
 const afterReload = await page.evaluate(() => ({ hud: document.getElementById('hudAmmo').textContent, ammo: { ...__mib.save.ammo.pistol }, total: __mib.totalAmmo() }));
 console.log('after reload:', afterReload.hud, JSON.stringify(afterReload.ammo));
 if (afterReload.ammo.mag <= afterFire.ammo.mag) errors.push(`reload did not refill mag (${afterFire.ammo.mag} -> ${afterReload.ammo.mag})`);

@@ -5,10 +5,33 @@ import * as T from './textures.js';
 import { box, lam, mesh, limb } from './models.js';
 import { ctx } from './core.js';
 import { PLAYER_SPEED, PLAYER_X_LIMIT } from './config.js';
+import { ASSET_VERSION } from './version.js';
 
 const SKIN = lam({ color: 0xe0ac84 });
-const CHAR_URL = 'assets/character-mobile.glb';
 const CHAR_SCALE = 0.9;
+export const CHAR_URL = `assets/character-mobile.glb?v=${ASSET_VERSION}`;
+export const ANIM_URL = `assets/animations.glb?v=${ASSET_VERSION}`;
+const PLACEHOLDER_MS = 1200; // show the box-kid if the GLB is still downloading
+
+const _preloads = new Map();
+export function assetUrl(path) {
+  return `${path}?v=${ASSET_VERSION}`;
+}
+export function preloadCharacterAssets() {
+  for (const url of [CHAR_URL, ANIM_URL]) {
+    if (_preloads.has(url)) continue;
+    const link = document.createElement('link');
+    link.rel = 'preload';
+    link.as = 'fetch';
+    link.crossOrigin = 'anonymous';
+    link.href = url;
+    document.head.appendChild(link);
+    _preloads.set(url, fetch(url).catch((err) => {
+      console.warn('preload failed', url, err);
+    }));
+  }
+}
+
 
 function makeGun() {
   const gunMat = lam({ color: 0x2b2b2e });
@@ -157,6 +180,9 @@ function attachSkinned(g, gltf) {
   const hand = findBone(model, 'RightHand');
   const hips = findBone(model, 'Hips');
   const head = findBone(model, 'Head') || new THREE.Group();
+  model.traverse((o) => {
+    if (o.isBone && o.quaternion) o.userData.restQ = o.quaternion.clone();
+  });
   const gun = makeGun();
   if (hand) {
     hand.add(gun);
@@ -198,7 +224,6 @@ function attachProcedural(g) {
 }
 
 
-const ANIM_URL = 'assets/animations.glb';
 
 function boneKey(name) {
   return String(name || '').replace(/^mixamorig:?/i, '');
@@ -281,9 +306,21 @@ function setupAnims(g, animGltf) {
 
 const _beamUp = new THREE.Vector3(0, 1, 0);
 const _beamDir = new THREE.Vector3();
-function attachLaser(ud) {
+function clearLaser(ud) {
+  if (!ud?.laser) return;
+  const { beam, dot } = ud.laser;
+  if (beam?.parent) beam.parent.remove(beam);
+  if (dot?.parent) dot.parent.remove(dot);
+  beam?.geometry?.dispose();
+  dot?.geometry?.dispose();
+  ud.laser = null;
+}
+
+function attachLaser(ud, force = false) {
   const scene = ctx.scene;
-  if (!scene || ud.laser) return;
+  if (!scene) return;
+  if (ud.laser && !force) return;
+  if (ud.laser && force) clearLaser(ud);
   const mat = new THREE.MeshBasicMaterial({
     color: 0xff1a14, transparent: true, opacity: 0.9, depthWrite: false,
   });
@@ -382,27 +419,12 @@ export function updateLaser() {
   ud.laser.dot.position.copy(_end);
 }
 
-const _lookQ = new THREE.Quaternion();
-const _lookE = new THREE.Euler();
-function applyLook(ud) {
-  const yaw = ctx.input.aimYaw || 0;
-  const pitch = ctx.input.aimPitch || 0;
-  if (ud.isSkinned) {
-    const spine = (ud.bones && (ud.bones.Spine2 || ud.bones.Spine1 || ud.bones.Spine)) || null;
-    if (spine) {
-      _lookE.set(pitch * 0.7, yaw, 0);
-      _lookQ.setFromEuler(_lookE);
-      spine.quaternion.multiply(_lookQ);
-    }
-    if (ud.head && ud.head.quaternion) {
-      _lookE.set(pitch * 0.35, yaw * 0.35, 0);
-      _lookQ.setFromEuler(_lookE);
-      ud.head.quaternion.multiply(_lookQ);
-    }
-  } else if (ud.head && ud.head.rotation) {
-    ud.head.rotation.y = yaw * 0.6;
-    ud.head.rotation.x = pitch * 0.5;
-  }
+// Aim turns the whole character (root yaw) and the laser / gun. It must never
+// write Head, Neck, or Spine bones — that accumulated into a spin on iPhone.
+function applyAim(player, ud) {
+  const yaw = THREE.MathUtils.clamp(ctx.input.aimYaw || 0, -0.7, 0.7);
+  const pitch = THREE.MathUtils.clamp(ctx.input.aimPitch || 0, -0.4, 0.35);
+  player.rotation.y = yaw;
   if (ud.gun && ud.gunRestRot) {
     ud.gun.rotation.copy(ud.gunRestRot);
     ud.gun.rotateX(pitch * 0.4);
@@ -423,54 +445,66 @@ function loadAnimations(g) {
   );
 }
 
+function showPlaceholder(g) {
+  if (g.userData.isSkinned) return;
+  if (g.userData.placeholder) return;
+  const prevLaser = g.userData.laser;
+  attachProcedural(g);
+  g.userData.placeholder = true;
+  g.userData.ready = true; // safe to play while the GLB is still coming in
+  g.userData.laser = prevLaser;
+  attachLaser(g.userData);
+}
+
+function attachCharacter(g, gltf) {
+  const prevLaser = g.userData.laser;
+  clearLaser(g.userData);
+  attachSkinned(g, gltf);
+  g.userData.placeholder = false;
+  g.userData.ready = true;
+  g.userData.laser = prevLaser;
+  attachLaser(g.userData, true);
+  loadAnimations(g);
+}
+
 export function makePlayer() {
   const g = new THREE.Group();
+  g.userData._loadGen = 0;
   // Temporary gun/head so firing and updatePlayer are safe before the model lands.
   const gun = makeGun();
   gun.position.set(0.1, 1.18, -0.5);
   g.add(gun);
   const head = new THREE.Group();
-  g.userData = { gun, head, isProcedural: true, ready: false, animsReady: false, gunRestRot: gun.rotation.clone() };
+  g.userData = { gun, head, isProcedural: true, ready: false, animsReady: false, placeholder: false, gunRestRot: gun.rotation.clone(), _loadGen: 0 };
   bindKick(g.userData, gun, gun.position);
   attachLaser(g.userData);
 
-  const fallbackTimer = setTimeout(() => {
-    if (!g.userData.ready) {
-      console.warn('character GLB took too long; using procedural kid');
-      attachProcedural(g);
-      g.userData.ready = true;
-      attachLaser(g.userData);
+  preloadCharacterAssets();
+
+  const placeholderTimer = setTimeout(() => {
+    if (!g.userData.isSkinned) {
+      console.info('character GLB still loading; showing placeholder kid');
+      showPlaceholder(g);
     }
-  }, 4000);
+  }, PLACEHOLDER_MS);
 
   const loader = new GLTFLoader();
   loader.load(
     CHAR_URL,
     (gltf) => {
-      if (g.userData.ready && g.userData.isProcedural && !g.userData.isSkinned) {
-        // already fell back; leave it
-        return;
-      }
-      clearTimeout(fallbackTimer);
+      clearTimeout(placeholderTimer);
       try {
-        attachSkinned(g, gltf);
-        g.userData.ready = true;
-        attachLaser(g.userData);
-        loadAnimations(g);
+        attachCharacter(g, gltf);
       } catch (err) {
         console.warn('character setup failed, using procedural kid', err);
-        attachProcedural(g);
-        g.userData.ready = true;
-        attachLaser(g.userData);
+        showPlaceholder(g);
       }
     },
     undefined,
     (err) => {
-      clearTimeout(fallbackTimer);
+      clearTimeout(placeholderTimer);
       console.warn('character load failed, using procedural kid', err);
-      attachProcedural(g);
-      g.userData.ready = true;
-      attachLaser(g.userData);
+      showPlaceholder(g);
     },
   );
   return g;
@@ -507,7 +541,7 @@ export function updatePlayer(dt) {
       playAnim(ud, 'idle');
     }
     ud.mixer.update(dt);
-    applyLook(ud);
+    applyAim(player, ud);
     return;
   }
 
@@ -516,8 +550,7 @@ export function updatePlayer(dt) {
     const bob = Math.sin(t * (dir ? 10 : 1.7)) * (dir ? 0.02 : 0.01);
     if (ud.hips) ud.hips.position.y = ud.hipsRestY + bob;
     if (ud.rig) ud.rig.rotation.z = THREE.MathUtils.lerp(ud.rig.rotation.z, dir * 0.04, 0.15);
-    applyLook(ud);
-    if (ud.head && ud.head.rotation) ud.head.rotation.y += Math.sin(t * 0.7) * 0.05;
+    applyAim(player, ud);
     return;
   }
 
@@ -526,7 +559,7 @@ export function updatePlayer(dt) {
     ud.legL.rotation.x = THREE.MathUtils.lerp(ud.legL.rotation.x, walk, 0.3);
     ud.legR.rotation.x = THREE.MathUtils.lerp(ud.legR.rotation.x, -walk, 0.3);
   }
-  applyLook(ud);
+  applyAim(player, ud);
 }
 
 export function notifyShot() {
@@ -537,7 +570,7 @@ export function notifyShot() {
 export function resetPlayer() {
   const { player, input } = ctx;
   if (!player) return;
-  ctx.G.px = 0; player.position.x = 0; player.rotation.z = 0;
+  ctx.G.px = 0; player.position.x = 0; player.rotation.set(0, 0, 0);
   input.aimYaw = 0; input.aimPitch = 0;
   const ud = player.userData;
   if (ud.hips) ud.hips.position.y = ud.hipsRestY || 0;

@@ -13,11 +13,10 @@ On iPhone: open the link in Safari → Share → **Add to Home Screen** → it l
 ## How to play
 | Action | Touch | Keyboard |
 |---|---|---|
-| Move left / right | ◀ ▶ buttons | A / D or ← → |
-| Shoot (hold) | FIRE | Space |
-| Aim (laser sight) | Drag on the right side, or drag on FIRE | — |
-| Reload | RELOAD | R |
-| Swap pistol | SWAP (only if you found another pistol) | Q |
+| Move left / right | Hold the left or right half of the screen | A / D or ← → |
+| Aim (laser sight) | The AIM stick in the bottom-left (always visible). Touching the stick aims only — it never moves you. | — |
+| Shoot | Tap with a second finger, or a quick tap while standing still | Space |
+| Reload | Happens automatically when the clip is empty | R |
 | Pause | ⏸ | Esc / P |
 
 - **Barricade**: zombies stop to smash it. If it breaks they come for you. If your health hits 0, game over.
@@ -42,7 +41,7 @@ To test on a phone on the same Wi-Fi, open `http://<your-computer-ip>:8642`.
 - **Three.js r170**, vendored at `vendor/three.module.min.js` (no CDN at runtime).
 - Plain ES modules, no bundler. Everything uses relative paths, so it works from a sub-path like GitHub Pages.
 - All textures are drawn in code on canvases (`src/textures.js`); all sound is synthesized with WebAudio (`src/audio.js`). No image or audio files besides the app icons.
-- Character: Mixamo Aj is loaded from a GLB (stored in the repo as base64 in `assets/b64/`, decoded by `npm run assets` and the Pages workflow), with Mixamo pistol animations (idle, strafe, shoot) in a second compact GLB. The original box-kid (and a posed idle) is kept as a fallback if a file fails to load.
+- Character: Mixamo Aj is loaded from a GLB (stored in the repo as base64 in `assets/b64/`, decoded by `npm run assets` and the Pages workflow), with Mixamo pistol animations (idle, strafe, shoot) in a second compact GLB. The original box-kid is shown as a temporary placeholder if the file is slow, then swapped out when Aj arrives (and kept if the file fails). Asset URLs are cache-busted with `?v=` on each Pages deploy so iPhone / Home Screen Safari does not keep a stale model. Textures in the GLB are JPEG (1024) and PNG (256), unlit, well under Safari's WebGL limits; import maps need iOS 16.4+.
 - Pistol only: scavenging finds pistol upgrades (damage, fire rate, clip size, reload speed), extra ammo, and sometimes another pistol, plus supplies and survivors.
 - Performance: low-poly primitives, Lambert materials, no shadows, instanced rubble/particles, pixel ratio capped at 2 and lowered automatically if frames get slow.
 - PWA: `manifest.webmanifest`, `icons/` (SVG source + generated PNGs including `apple-touch-icon.png`).
