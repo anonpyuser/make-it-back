@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Make It Back</title>
+<meta name="description" content="Make It Back: a zombie survival game. Hold the barricade, scavenge by day, make it back alive.">
+<meta name="theme-color" content="#0a0908">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Make It Back">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="game"></div>
+
+<!-- Title -->
+<section id="title" class="screen">
+  <div class="title-top">
+    <h1 class="logo">MAKE<br>IT BACK</h1>
+    <p class="tag">Hold the barricade. Scavenge by day. Survive the night.</p>
+  </div>
+  <div class="title-bottom">
+    <button id="btnContinue" class="btn big hidden">Continue <span id="continueInfo"></span></button>
+    <button id="btnNew" class="btn big primary">New Game</button>
+    <p id="bestWave" class="small"></p>
+    <p class="small dim">Tip: tap the 🔊 button to mute. On iPhone: Share → Add to Home Screen.</p>
+  </div>
+</section>
+
+<!-- HUD -->
+<section id="hud" class="hidden">
+  <div class="hud-top">
+    <div class="hud-row">
+      <div id="hudWave" class="pill">WAVE 1</div>
+      <div id="hudLeft" class="pill dim">🧟 0</div>
+      <div id="hudSurv" class="pill dim">🧍 0</div>
+      <button id="btnPause" class="icon-btn" aria-label="Pause">⏸</button>
+      <button id="btnMute" class="icon-btn" aria-label="Mute">🔊</button>
+    </div>
+    <div class="bar"><span class="bar-label">❤️ YOU</span><div class="bar-fill hp" id="barHp"></div></div>
+    <div class="bar"><span class="bar-label">🪵 BARRICADE</span><div class="bar-fill bc" id="barBc"></div></div>
+  </div>
+  <div id="banner" class="banner"></div>
+  <div id="hurt" class="hurt"></div>
+  <div class="controls">
+    <div class="move">
+      <button id="btnLeft" class="ctl" aria-label="Move left">◀</button>
+      <button id="btnRight" class="ctl" aria-label="Move right">▶</button>
+    </div>
+    <div class="weapon-info">
+      <div id="hudWeapon">PISTOL</div>
+      <div id="hudAmmo">12 / ∞</div>
+      <div id="hudReload" class="reload-bar"><div></div></div>
+    </div>
+    <div class="actions">
+      <div class="small-actions">
+        <button id="btnSwap" class="ctl small" aria-label="Swap weapon">⇄<span>SWAP</span></button>
+        <button id="btnReload" class="ctl small" aria-label="Reload">↻<span>RELOAD</span></button>
+      </div>
+      <button id="btnFire" class="ctl fire" aria-label="Fire">FIRE</button>
+    </div>
+  </div>
+</section>
+
+<!-- Pause -->
+<section id="pause" class="screen overlay hidden">
+  <h2>Paused</h2>
+  <button id="btnResume" class="btn big primary">Resume</button>
+  <button id="btnQuit" class="btn">Quit to title</button>
+</section>
+
+<!-- Search (between waves) -->
+<section id="search" class="screen overlay scroll hidden">
+  <h2 id="searchTitle">Wave 1 survived</h2>
+  <p class="dim">The dead have gone quiet. Use your daylight to scavenge.</p>
+  <div class="stats">
+    <div>☀️ <b id="hoursLeft">8</b> hrs left</div>
+    <div>❤️ <b id="sHp">100</b></div>
+    <div>🪵 <b id="sBc">500</b></div>
+    <div>🧍 <b id="sSurv">0</b></div>
+  </div>
+  <div id="finds" class="finds"></div>
+  <div id="locations" class="locations"></div>
+  <button id="btnRepair" class="btn">🔨 Repair barricade yourself (1 hr, +50)</button>
+  <div id="arsenal" class="arsenal"></div>
+  <button id="btnNextWave" class="btn big primary">Start Wave 2 ▶</button>
+</section>
+
+<!-- Game over -->
+<section id="gameover" class="screen overlay hidden">
+  <h2 class="red">YOU DIDN'T MAKE IT</h2>
+  <p id="goText"></p>
+  <button id="btnRetry" class="btn big primary">Retry this wave</button>
+  <button id="btnGoTitle" class="btn">Title screen</button>
+</section>
+
+<div id="loading" class="screen"><p>Loading…</p></div>
+<noscript>Make It Back needs JavaScript.</noscript>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
