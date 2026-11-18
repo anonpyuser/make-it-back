@@ -1,22 +1,62 @@
-// Weapons: stats, firing (hitscan), reloading, swapping.
+// Weapons: pistol stats (with upgrades), firing (hitscan), reloading.
 import * as THREE from '../vendor/three.module.min.js';
 import { ctx } from './core.js';
 import { sfx } from './audio.js';
 import { muzzleFlash, addTracer } from './effects.js';
 import { damageZombie } from './zombies.js';
+import { PISTOL_UPGRADE_MAX } from './config.js';
 
-export const WEAPONS = {
-  pistol:  { name: 'Pistol',  damage: 26, rate: 3.2, mag: 12, reload: 1.1, spread: 0.02, pellets: 1, pierce: 1, infinite: true, maxReserve: 0 },
-  shotgun: { name: 'Shotgun', damage: 16, rate: 1.2, mag: 6,  reload: 2.0, spread: 0.13, pellets: 7, pierce: 1, maxReserve: 60 },
-  rifle:   { name: 'Rifle',   damage: 75, rate: 1.7, mag: 8,  reload: 1.8, spread: 0.0,  pellets: 1, pierce: 3, maxReserve: 64 },
-  smg:     { name: 'SMG',     damage: 15, rate: 11,  mag: 30, reload: 1.6, spread: 0.06, pellets: 1, pierce: 1, maxReserve: 240 },
+const PISTOL_BASE = {
+  name: 'Pistol',
+  damage: 26,
+  rate: 3.2,
+  mag: 12,
+  reload: 1.1,
+  spread: 0.02,
+  pellets: 1,
+  pierce: 1,
+  infinite: true,
+  maxReserve: 0,
 };
-export const WEAPON_ORDER = ['pistol', 'smg', 'shotgun', 'rifle'];
 
-export const weapon = () => WEAPONS[ctx.save.current];
-export const ammo = () => ctx.save.ammo[ctx.save.current];
+export const UPGRADE_INFO = {
+  damage: { label: 'damage', icon: '💥', text: 'Pistol upgrade: more damage' },
+  rate:   { label: 'fire rate', icon: '⚡', text: 'Pistol upgrade: faster fire rate' },
+  mag:    { label: 'clip size', icon: '🔧', text: 'Pistol upgrade: bigger clip (+4)' },
+  reload: { label: 'reload speed', icon: '⏱', text: 'Pistol upgrade: quicker reload' },
+};
+
+function levels() {
+  const u = (ctx.save && ctx.save.upgrades) || {};
+  return {
+    damage: Math.max(0, Math.min(PISTOL_UPGRADE_MAX, u.damage | 0)),
+    rate:   Math.max(0, Math.min(PISTOL_UPGRADE_MAX, u.rate | 0)),
+    mag:    Math.max(0, Math.min(PISTOL_UPGRADE_MAX, u.mag | 0)),
+    reload: Math.max(0, Math.min(PISTOL_UPGRADE_MAX, u.reload | 0)),
+  };
+}
+
+// Effective pistol stats after upgrades. Other guns were removed.
+export function pistolStats(upgrades) {
+  const u = upgrades || levels();
+  return {
+    ...PISTOL_BASE,
+    damage: PISTOL_BASE.damage + u.damage * 6,
+    rate:   PISTOL_BASE.rate + u.rate * 0.6,
+    mag:    PISTOL_BASE.mag + u.mag * 4,
+    reload: Math.max(0.45, PISTOL_BASE.reload - u.reload * 0.15),
+  };
+}
+
+export const WEAPONS = { pistol: PISTOL_BASE };
+export const WEAPON_ORDER = ['pistol'];
+
+export const weapon = () => pistolStats();
+export const ammo = () => ctx.save.ammo.pistol;
 
 const muzzle = new THREE.Vector3(), end = new THREE.Vector3();
+const fwd = new THREE.Vector3();
+const gunQ = new THREE.Quaternion();
 
 // Holding fire shoots at the weapon's fire rate (semi-autos too, for easy touch play).
 export function updateWeapons(dt) {
@@ -27,21 +67,24 @@ export function updateWeapons(dt) {
 }
 
 function tryFire() {
-  const { G, player, save } = ctx;
+  const { G, player } = ctx;
   const W = weapon(), A = ammo();
   if (G.reloadT > 0 || G.fireCd > 0) return;
   if (A.mag <= 0) {
     if (W.infinite || A.reserve > 0) startReload();
-    else { sfx.empty(); G.fireCd = 0.3; autoSwitchIfEmpty(); }
+    else { sfx.empty(); G.fireCd = 0.3; }
     return;
   }
   A.mag--;
   G.fireCd = 1 / W.rate;
-  sfx.shot(save.current);
-  player.userData.gun.getWorldPosition(muzzle);
-  muzzle.z -= 0.45; muzzle.y += 0.03;
+  sfx.shot('pistol');
+  const gun = player.userData.gun;
+  gun.getWorldPosition(muzzle);
+  gun.getWorldQuaternion(gunQ);
+  fwd.set(0, 0, -1).applyQuaternion(gunQ);
+  muzzle.addScaledVector(fwd, 0.45);
   muzzleFlash(muzzle);
-  player.userData.gun.position.z = -0.42; // recoil kick
+  if (typeof player.userData.kickGun === 'function') player.userData.kickGun();
   for (let i = 0; i < W.pellets; i++) shootRay(muzzle, (Math.random() - 0.5) * 2 * W.spread, W.damage, W.pierce);
   if (A.mag === 0 && (W.infinite || A.reserve > 0)) startReload();
 }
@@ -76,19 +119,22 @@ function finishReload() {
   const take = W.infinite ? W.mag - A.mag : Math.min(W.mag - A.mag, A.reserve);
   A.mag += take; if (!W.infinite) A.reserve -= take;
 }
-export function swapWeapon() {
-  const { save, G } = ctx;
-  if (save.weapons.length < 2) return;
-  const owned = WEAPON_ORDER.filter(w => save.weapons.includes(w));
-  save.current = owned[(owned.indexOf(save.current) + 1) % owned.length];
-  G.reloadT = 0; G.fireCd = 0.25;
-  sfx.click();
-}
-function autoSwitchIfEmpty() {
-  const { save, G } = ctx;
-  const A = ammo();
-  if (A.mag === 0 && A.reserve === 0 && !weapon().infinite) {
-    const usable = WEAPON_ORDER.filter(w => save.weapons.includes(w) && (WEAPONS[w].infinite || save.ammo[w].mag + save.ammo[w].reserve > 0));
-    if (usable.length) { save.current = usable[usable.length - 1]; G.fireCd = 0.3; }
+
+// Kept so leftover keyboard/UI hooks don't crash. The swap button is hidden.
+export function swapWeapon() { /* pistol only */ }
+
+export function applyPistolUpgrade(save, kind) {
+  if (!save.upgrades) save.upgrades = { damage: 0, rate: 0, mag: 0, reload: 0 };
+  const info = UPGRADE_INFO[kind];
+  if (!info) return null;
+  const cur = save.upgrades[kind] | 0;
+  if (cur >= PISTOL_UPGRADE_MAX) return { maxed: true, ...info };
+  const oldMag = pistolStats(save.upgrades).mag;
+  save.upgrades[kind] = cur + 1;
+  if (kind === 'mag') {
+    const neu = pistolStats(save.upgrades).mag;
+    const A = save.ammo.pistol;
+    if (A && A.mag >= oldMag) A.mag = neu;
   }
+  return { maxed: false, ...info, level: save.upgrades[kind] };
 }
