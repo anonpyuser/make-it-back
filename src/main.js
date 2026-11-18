@@ -1,0 +1,198 @@
+// Make It Back: bootstraps the renderer and runs the frame loop.
+import * as THREE from '../vendor/three.module.min.js';
+import { ctx, $ } from './core.js';
+import { buildWorld } from './world.js';
+import { makePlayer, updatePlayer, debugSetAim, preloadCharacterAssets } from './player.js';
+import { addFoundAmmo, totalAmmo, waveAllotment, pistolStats } from './weapons.js';
+import { shotsToClearTypes } from './zombies.js';
+import { applyFind } from './search.js';
+import { initEffects, updateEffects } from './effects.js';
+import { newSave, writeSave } from './save.js';
+import { updateWave } from './waves.js';
+import { damageZombie } from './zombies.js';
+import { initUI, goTitle, updateBanner } from './ui.js';
+
+preloadCharacterAssets();
+
+// ----- renderer / scene -----
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+let pixelRatio = Math.min(window.devicePixelRatio || 1, 2); // capped for iPhone performance
+renderer.setPixelRatio(pixelRatio);
+renderer.setSize(innerWidth, innerHeight, false);
+$('game').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 80);
+Object.assign(ctx, { renderer, scene, camera, save: newSave() });
+ctx.world = buildWorld(scene);
+ctx.player = makePlayer();
+scene.add(ctx.player);
+initEffects(scene);
+
+function viewSize() {
+  const vv = window.visualViewport;
+  const w = Math.max(1, Math.round(vv?.width ?? innerWidth));
+  const h = Math.max(1, Math.round(vv?.height ?? innerHeight));
+  return { w, h };
+}
+
+function resize() {
+  const { w, h } = viewSize();
+  const aspect = w / h;
+  camera.aspect = aspect;
+  // Tall portrait: keep a usable horizontal FOV without dumping half the screen into the near floor.
+  const hfov = THREE.MathUtils.degToRad(48);
+  const vfov = 2 * Math.atan(Math.tan(hfov / 2) / aspect);
+  camera.fov = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(vfov), 48, 68);
+  camera.updateProjectionMatrix();
+  // false: leave CSS to stretch the canvas over #game (100dvh), so a stale inline
+  // height cannot leave a black band under the 3D view on iOS Safari.
+  renderer.setSize(w, h, false);
+}
+
+addEventListener('resize', resize);
+addEventListener('orientationchange', () => setTimeout(resize, 80));
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', resize);
+  visualViewport.addEventListener('scroll', resize);
+}
+resize();
+
+// ----- camera: orbit the kid on the title screen, follow behind him in game -----
+function updateCamera(dt) {
+  if (ctx.camHold) return;
+  if (ctx.state === 'title') {
+    const t = performance.now() / 1000;
+    camera.position.set(Math.sin(t * 0.35) * 1.6, 1.55, -2.4 + Math.cos(t * 0.35) * 0.2);
+    camera.lookAt(0, 1.15, 0);
+    return;
+  }
+  camera.position.x = THREE.MathUtils.lerp(camera.position.x, ctx.G.px * 0.55, Math.min(1, dt * 6));
+  // Closer and a bit lower so Aj reads larger and the hallway fills a tall phone.
+  camera.position.y = 1.92; camera.position.z = 3.25;
+  camera.lookAt(camera.position.x * 0.55, 1.12, -8.2);
+}
+
+// ----- adaptive resolution: drop pixel ratio if frames are slow -----
+let perfAcc = 0, perfFrames = 0;
+function adaptPerf(dt) {
+  perfAcc += dt; perfFrames++;
+  if (perfAcc > 2) {
+    if (perfAcc / perfFrames > 1 / 45 && pixelRatio > 1) {
+      pixelRatio = Math.max(1, pixelRatio - 0.25);
+      renderer.setPixelRatio(pixelRatio);
+      const { w, h } = viewSize();
+      renderer.setSize(w, h, false);
+    }
+    perfAcc = 0; perfFrames = 0;
+  }
+}
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (ctx.state === 'playing') updateWave(dt);
+  else if (ctx.state === 'title') { ctx.G.time += dt; updatePlayer(dt); }
+  ctx.world.update(dt);
+  updateCamera(dt);
+  updateEffects(dt);
+  updateBanner(dt);
+  if (ctx.state === 'playing' || ctx.state === 'title') adaptPerf(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+// Test/debug hook used by tools/test.mjs (harmless in normal play).
+window.__mib = {
+  get state() { return ctx.state; },
+  get G() { return ctx.G; },
+  get save() { return ctx.save; },
+  clearWave() { ctx.G.toSpawn = 0; for (const z of ctx.G.zombies) if (!z.dead) damageZombie(z, 1e6); },
+  debugSetAim,
+  get player() { return ctx.player; },
+  get camera() { return ctx.camera; },
+  setCamHold(v) { ctx.camHold = !!v; },
+  inputState() {
+    const i = ctx.input;
+    return { left: !!i.left, right: !!i.right, fire: !!i.fire, aimYaw: i.aimYaw || 0, aimPitch: i.aimPitch || 0, px: ctx.G.px };
+  },
+  // Step the player at a fixed 60Hz and record the Head local quaternion.
+  // Used to catch a wraparound spin that a slow rAF yaw-range sample can miss.
+  sampleHeadQuat(dir, seconds = 3, hz = 60) {
+    const input = ctx.input;
+    const prev = { left: input.left, right: input.right };
+    input.left = dir === 'left';
+    input.right = dir === 'right';
+    const head = ctx.player?.userData?.head;
+    const dt = 1 / hz;
+    const frames = Math.max(1, Math.round(seconds * hz));
+    const q = new THREE.Quaternion();
+    const p = new THREE.Quaternion();
+    const samples = [];
+    let maxStep = 0, acc = 0, flips = 0;
+    for (let i = 0; i < frames; i++) {
+      updatePlayer(dt);
+      if (!head) continue;
+      q.copy(head.quaternion).normalize();
+      let ang = 0, dot = 1;
+      if (samples.length) {
+        p.set(samples[samples.length - 1].x, samples[samples.length - 1].y, samples[samples.length - 1].z, samples[samples.length - 1].w);
+        dot = p.x * q.x + p.y * q.y + p.z * q.z + p.w * q.w;
+        if (dot < 0) flips++;
+        ang = p.angleTo(q);
+        if (ang > maxStep) maxStep = ang;
+        acc += ang;
+      }
+      samples.push({ i, t: i * dt, x: q.x, y: q.y, z: q.z, w: q.w, ang, dot });
+    }
+    input.left = prev.left; input.right = prev.right;
+    return {
+      n: samples.length, dir, seconds, hz,
+      maxStep, acc, flips,
+      skinned: !!ctx.player?.userData?.isSkinned,
+      clip: ctx.player?.userData?.currentClip || null,
+    };
+  },
+  headPose() {
+    const head = ctx.player?.userData?.head;
+    if (!head) return null;
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    head.updateWorldMatrix(true, false);
+    head.getWorldQuaternion(q);
+    e.setFromQuaternion(q, 'YXZ');
+    return {
+      skinned: !!ctx.player.userData.isSkinned,
+      placeholder: !!ctx.player.userData.placeholder,
+      animsReady: !!ctx.player.userData.animsReady,
+      lx: head.rotation.x, ly: head.rotation.y, lz: head.rotation.z,
+      wx: e.x, wy: e.y, wz: e.z,
+    };
+  },
+  characterState() {
+    const ud = ctx.player?.userData || {};
+    return {
+      ready: !!ud.ready,
+      isSkinned: !!ud.isSkinned,
+      isProcedural: !!ud.isProcedural,
+      placeholder: !!ud.placeholder,
+      animsReady: !!ud.animsReady,
+      clip: ud.currentClip || null,
+    };
+  },
+  findAmmo(n) { const v = addFoundAmmo(ctx.save, n); writeSave(ctx.save); return v; },
+  applyFind(kind, extra) { return applyFind(ctx.save, kind, extra); },
+  totalAmmo() { return totalAmmo(ctx.save); },
+  waveAllotment() { return ctx.G.waveAllotment; },
+  clip() { return ctx.player?.userData?.currentClip || null; },
+  setAim(yaw, pitch) { ctx.input.aimYaw = yaw; ctx.input.aimPitch = pitch; },
+  animsReady() { return !!(ctx.player?.userData?.animsReady); },
+  shotsToClear(types, hpMul, damage) { return shotsToClearTypes(types, hpMul, damage); },
+  pistolStats: () => pistolStats(),
+};
+
+initUI();
+goTitle();
+$('loading').classList.add('hidden');
+requestAnimationFrame(frame);
