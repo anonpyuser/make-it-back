@@ -1,6 +1,6 @@
 # Publishes the game to GitHub Pages on every push to main.
 # Pages serves the `gh-pages` branch. This job copies the static files there,
-# decoding the PNG icons (kept in the repo as base64 text in icons/b64/).
+# decoding PNG icons and GLB models (kept in the repo as base64 text in */b64/).
 # Don't edit gh-pages by hand: it is overwritten on every deploy.
 name: Deploy to GitHub Pages
 on:
@@ -20,11 +20,13 @@ jobs:
       - name: Collect the static site
         run: |
           mkdir _site
-          cp -r index.html style.css manifest.webmanifest src vendor icons _site/
+          cp -r index.html style.css manifest.webmanifest src vendor icons assets _site/
           for f in icons/b64/*.b64; do base64 -d "$f" > "_site/icons/$(basename "$f" .b64)"; done
-          rm -rf _site/icons/b64
+          mkdir -p _site/assets
+          for f in assets/b64/*.b64; do base64 -d "$f" > "_site/assets/$(basename "$f" .b64)"; done
+          rm -rf _site/icons/b64 _site/assets/b64
           touch _site/.nojekyll
-          ls -la _site _site/icons
+          ls -la _site _site/icons _site/assets
       - name: Publish to the gh-pages branch
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
