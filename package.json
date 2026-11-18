@@ -1,0 +1,18 @@
+{
+  "name": "make-it-back",
+  "version": "0.1.0",
+  "description": "Make It Back: a 3D zombie survival web game for iPhone Safari (Three.js, no build step).",
+  "scripts": {
+    "start": "python3 -m http.server 8642",
+    "test": "node tools/test.mjs && node tools/test-breach.mjs",
+    "icons": "node tools/make-icons.mjs",
+    "vendor": "cp node_modules/three/build/three.module.min.js vendor/ && cp node_modules/three/LICENSE vendor/THREE-LICENSE"
+  },
+  "license": "UNLICENSED",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "playwright-core": "1.48",
+    "three": "0.170.0"
+  }
+}
