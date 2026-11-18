@@ -1,0 +1,7 @@
+node_modules/
+.DS_Store
+*.log
+_site/
+screenshots/
+# PNG icons are stored as base64 text in icons/b64/ and decoded at deploy time
+icons/*.png
