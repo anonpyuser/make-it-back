@@ -178,6 +178,8 @@ function attachSkinned(g, gltf) {
   ud.bones = bones;
   ud.hand = hand;
   bindKick(ud, gun, gun.position);
+  ud.gunRestRot = gun.rotation.clone();
+  ud.animsReady = false;
   g.userData = ud;
 }
 
@@ -190,7 +192,235 @@ function attachProcedural(g) {
   ud.isProcedural = true;
   ud.isSkinned = false;
   bindKick(ud, ud.gun, ud.gun.position);
+  ud.gunRestRot = ud.gun.rotation.clone();
+  ud.animsReady = false;
   g.userData = ud;
+}
+
+
+const ANIM_URL = 'assets/animations.glb';
+
+function boneKey(name) {
+  return String(name || '').replace(/^mixamorig:?/i, '');
+}
+
+function retargetClip(clip, targetRoot, clipName) {
+  const names = new Map();
+  targetRoot.traverse((o) => {
+    if (o.name) names.set(boneKey(o.name), o.name);
+  });
+  const tracks = [];
+  for (const t of clip.tracks) {
+    const dot = t.name.indexOf('.');
+    if (dot < 0) continue;
+    const node = t.name.slice(0, dot);
+    const prop = t.name.slice(dot + 1);
+    const mapped = names.get(boneKey(node));
+    if (!mapped) continue;
+    const nt = t.clone();
+    nt.name = `${mapped}.${prop}`;
+    // Strip root motion so the game can slide him on X without the clip walking away.
+    if (prop === 'position' && boneKey(node) === 'Hips' && nt.values && nt.values.length >= 3) {
+      const v = nt.values;
+      const x0 = v[0], z0 = v[2];
+      for (let i = 0; i < v.length; i += 3) {
+        v[i] = x0;
+        v[i + 2] = z0;
+      }
+    }
+    tracks.push(nt);
+  }
+  return new THREE.AnimationClip(clipName || clip.name, clip.duration, tracks);
+}
+
+function playAnim(ud, name, fade = 0.12) {
+  if (!ud.actions || !ud.actions[name]) return;
+  if (ud.currentClip === name && name !== 'shoot') return;
+  const next = ud.actions[name];
+  const prev = ud.action;
+  if (name === 'shoot') {
+    next.reset().setEffectiveWeight(1).fadeIn(0.05).play();
+    if (prev && prev !== next) prev.fadeOut(0.05);
+    ud.action = next;
+    ud.currentClip = name;
+    ud.shooting = true;
+    return;
+  }
+  if (prev && prev !== next) prev.fadeOut(fade);
+  next.reset().setEffectiveWeight(1).fadeIn(fade).play();
+  ud.action = next;
+  ud.currentClip = name;
+}
+
+function setupAnims(g, animGltf) {
+  const ud = g.userData;
+  if (!ud.isSkinned || !ud.model || !animGltf?.animations?.length) return;
+  const mixer = new THREE.AnimationMixer(ud.model);
+  const actions = {};
+  for (const clip of animGltf.animations) {
+    const retargeted = retargetClip(clip, ud.model, clip.name);
+    if (!retargeted.tracks.length) continue;
+    const action = mixer.clipAction(retargeted);
+    if (clip.name === 'shoot') {
+      action.setLoop(THREE.LoopOnce, 1);
+      action.clampWhenFinished = true;
+    } else {
+      action.setLoop(THREE.LoopRepeat, Infinity);
+    }
+    actions[clip.name] = action;
+  }
+  ud.mixer = mixer;
+  ud.actions = actions;
+  ud.currentClip = null;
+  ud.animsReady = !!actions.idle;
+  mixer.addEventListener('finished', (e) => {
+    if (e.action === actions.shoot) ud.shooting = false;
+  });
+  playAnim(ud, 'idle', 0);
+}
+
+const _beamUp = new THREE.Vector3(0, 1, 0);
+const _beamDir = new THREE.Vector3();
+function attachLaser(ud) {
+  const scene = ctx.scene;
+  if (!scene || ud.laser) return;
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xff1a14, transparent: true, opacity: 0.9, depthWrite: false,
+  });
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.006, 1, 6), mat);
+  beam.frustumCulled = false;
+  beam.visible = false;
+  const dot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.06, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xff2a20, depthWrite: false, transparent: true, opacity: 0.95 }),
+  );
+  dot.frustumCulled = false;
+  dot.visible = false;
+  scene.add(beam, dot);
+  ud.laser = { beam, dot };
+}
+
+const _muzzle = new THREE.Vector3();
+const _end = new THREE.Vector3();
+const _fwd = new THREE.Vector3();
+const _gunQ = new THREE.Quaternion();
+const _side = new THREE.Vector3();
+
+function rayHitZombie(from, dir, z) {
+  const ox = from.x - z.x, oz = from.z - z.z;
+  const dx = dir.x, dz = dir.z;
+  const rad = z.radius + 0.16;
+  const a = dx * dx + dz * dz;
+  const b = ox * dx + oz * dz;
+  const c = ox * ox + oz * oz - rad * rad;
+  const disc = b * b - a * c;
+  if (disc < 0 || a < 1e-8) return null;
+  const t = (-b - Math.sqrt(disc)) / a;
+  if (t < 0.05) return null;
+  const y = from.y + dir.y * t;
+  if (y < 0.05 || y > 2.4 * (z.mesh?.scale?.x || 1)) return null;
+  return t;
+}
+
+export function laserHitDist(from, dir, maxDist = 28) {
+  let dist = maxDist;
+  if (dir.y < -1e-4) {
+    const t = (0.02 - from.y) / dir.y;
+    if (t > 0.05 && t < dist) dist = t;
+  }
+  const zombies = ctx.G?.zombies || [];
+  for (const z of zombies) {
+    if (z.dead) continue;
+    const t = rayHitZombie(from, dir, z);
+    if (t != null && t < dist) dist = t;
+  }
+  return dist;
+}
+
+// Shots and the laser follow this aim, not the gun bone's local -Z
+// (Mixamo hand axes don't keep the barrel lined up with -Z).
+export function aimDirection(dir) {
+  const yaw = ctx.input.aimYaw || 0;
+  const pitch = ctx.input.aimPitch || 0;
+  dir.set(0, 0, -1);
+  dir.applyAxisAngle(_beamUp, yaw);
+  _side.set(1, 0, 0).applyAxisAngle(_beamUp, yaw);
+  dir.applyAxisAngle(_side, pitch);
+  dir.normalize();
+  return dir;
+}
+
+export function gunAim(from, dir) {
+  const player = ctx.player;
+  const gun = player?.userData?.gun;
+  if (player) player.updateMatrixWorld(true);
+  if (gun) gun.getWorldPosition(from);
+  else from.set(ctx.G.px || 0, 1.15, 0.15);
+  aimDirection(dir);
+  from.addScaledVector(dir, 0.25);
+  return true;
+}
+
+export function updateLaser() {
+  const { player, state } = ctx;
+  const ud = player?.userData;
+  if (!ud) return;
+  if (!ud.laser) attachLaser(ud);
+  if (!ud.laser) return;
+  const show = state === 'playing';
+  ud.laser.beam.visible = show;
+  ud.laser.dot.visible = show;
+  if (!show) return;
+  if (!gunAim(_muzzle, _fwd)) return;
+  const dist = Math.max(0.2, laserHitDist(_muzzle, _fwd));
+  _end.copy(_muzzle).addScaledVector(_fwd, dist);
+  const beam = ud.laser.beam;
+  beam.position.copy(_muzzle).add(_end).multiplyScalar(0.5);
+  _beamDir.copy(_end).sub(_muzzle).normalize();
+  beam.quaternion.setFromUnitVectors(_beamUp, _beamDir);
+  beam.scale.set(1, dist, 1);
+  ud.laser.dot.position.copy(_end);
+}
+
+const _lookQ = new THREE.Quaternion();
+const _lookE = new THREE.Euler();
+function applyLook(ud) {
+  const yaw = ctx.input.aimYaw || 0;
+  const pitch = ctx.input.aimPitch || 0;
+  if (ud.isSkinned) {
+    const spine = (ud.bones && (ud.bones.Spine2 || ud.bones.Spine1 || ud.bones.Spine)) || null;
+    if (spine) {
+      _lookE.set(pitch * 0.7, yaw, 0);
+      _lookQ.setFromEuler(_lookE);
+      spine.quaternion.multiply(_lookQ);
+    }
+    if (ud.head && ud.head.quaternion) {
+      _lookE.set(pitch * 0.35, yaw * 0.35, 0);
+      _lookQ.setFromEuler(_lookE);
+      ud.head.quaternion.multiply(_lookQ);
+    }
+  } else if (ud.head && ud.head.rotation) {
+    ud.head.rotation.y = yaw * 0.6;
+    ud.head.rotation.x = pitch * 0.5;
+  }
+  if (ud.gun && ud.gunRestRot) {
+    ud.gun.rotation.copy(ud.gunRestRot);
+    ud.gun.rotateX(pitch * 0.4);
+  }
+}
+
+function loadAnimations(g) {
+  const loader = new GLTFLoader();
+  loader.load(
+    ANIM_URL,
+    (gltf) => {
+      if (!g.userData.isSkinned) return;
+      try { setupAnims(g, gltf); }
+      catch (err) { console.warn('animation setup failed; using posed idle', err); }
+    },
+    undefined,
+    (err) => { console.warn('animation load failed; using posed idle', err); },
+  );
 }
 
 export function makePlayer() {
@@ -200,14 +430,16 @@ export function makePlayer() {
   gun.position.set(0.1, 1.18, -0.5);
   g.add(gun);
   const head = new THREE.Group();
-  g.userData = { gun, head, isProcedural: true, ready: false };
+  g.userData = { gun, head, isProcedural: true, ready: false, animsReady: false, gunRestRot: gun.rotation.clone() };
   bindKick(g.userData, gun, gun.position);
+  attachLaser(g.userData);
 
   const fallbackTimer = setTimeout(() => {
     if (!g.userData.ready) {
       console.warn('character GLB took too long; using procedural kid');
       attachProcedural(g);
       g.userData.ready = true;
+      attachLaser(g.userData);
     }
   }, 4000);
 
@@ -223,10 +455,13 @@ export function makePlayer() {
       try {
         attachSkinned(g, gltf);
         g.userData.ready = true;
+        attachLaser(g.userData);
+        loadAnimations(g);
       } catch (err) {
         console.warn('character setup failed, using procedural kid', err);
         attachProcedural(g);
         g.userData.ready = true;
+        attachLaser(g.userData);
       }
     },
     undefined,
@@ -235,12 +470,13 @@ export function makePlayer() {
       console.warn('character load failed, using procedural kid', err);
       attachProcedural(g);
       g.userData.ready = true;
+      attachLaser(g.userData);
     },
   );
   return g;
 }
 
-// Movement + idle/walk animation. Called every frame on the title and while playing.
+// Movement + animation. Called every frame on the title and while playing.
 export function updatePlayer(dt) {
   const { G, input, player } = ctx;
   if (!player) return;
@@ -257,12 +493,31 @@ export function updatePlayer(dt) {
     ud.gun.position.z = THREE.MathUtils.lerp(ud.gun.position.z, ud.gunRest.z, 0.25);
   }
 
+  if (ud.mixer && ud.animsReady) {
+    if (ud.shooting && input.fire) {
+      // keep / restart handled by onShot
+    } else if (ud.shooting) {
+      // let the one-shot finish
+    } else if (dir < 0) {
+      // After the 180° Y flip, Mixamo +X (strafeRight) reads as world left.
+      playAnim(ud, 'strafeRight');
+    } else if (dir > 0) {
+      playAnim(ud, 'strafeLeft');
+    } else {
+      playAnim(ud, 'idle');
+    }
+    ud.mixer.update(dt);
+    applyLook(ud);
+    return;
+  }
+
   if (ud.isSkinned) {
     const t = G.time || 0;
     const bob = Math.sin(t * (dir ? 10 : 1.7)) * (dir ? 0.02 : 0.01);
     if (ud.hips) ud.hips.position.y = ud.hipsRestY + bob;
     if (ud.rig) ud.rig.rotation.z = THREE.MathUtils.lerp(ud.rig.rotation.z, dir * 0.04, 0.15);
-    if (ud.head && ud.head.rotation) ud.head.rotation.y = Math.sin(t * 0.7) * 0.05;
+    applyLook(ud);
+    if (ud.head && ud.head.rotation) ud.head.rotation.y += Math.sin(t * 0.7) * 0.05;
     return;
   }
 
@@ -271,16 +526,24 @@ export function updatePlayer(dt) {
     ud.legL.rotation.x = THREE.MathUtils.lerp(ud.legL.rotation.x, walk, 0.3);
     ud.legR.rotation.x = THREE.MathUtils.lerp(ud.legR.rotation.x, -walk, 0.3);
   }
-  if (ud.head) ud.head.rotation.y = Math.sin((G.time || 0) * 0.7) * 0.05;
+  applyLook(ud);
+}
+
+export function notifyShot() {
+  const ud = ctx.player?.userData;
+  if (ud?.animsReady) playAnim(ud, 'shoot');
 }
 
 export function resetPlayer() {
-  const { player } = ctx;
+  const { player, input } = ctx;
   if (!player) return;
   ctx.G.px = 0; player.position.x = 0; player.rotation.z = 0;
+  input.aimYaw = 0; input.aimPitch = 0;
   const ud = player.userData;
   if (ud.hips) ud.hips.position.y = ud.hipsRestY || 0;
   if (ud.rig) ud.rig.rotation.z = 0;
+  ud.shooting = false;
+  if (ud.animsReady) playAnim(ud, 'idle', 0);
 }
 
 // Used by headless tests / debug to retune the aim pose without a reload.

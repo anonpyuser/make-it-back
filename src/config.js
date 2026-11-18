@@ -7,3 +7,4 @@ export const PLAYER_SPEED = 4.2;     // units / second
 export const PLAYER_X_LIMIT = 3.4;   // how far left/right the kid can move
 export const SPAWN_Z = [-20, -16];   // zombies appear in this z range (closer than the far fog)
 export const PISTOL_UPGRADE_MAX = 5; // levels for each pistol upgrade
+export const AMMO_BUFFER = 10;       // extra bullets on top of "enough to clear the wave"
